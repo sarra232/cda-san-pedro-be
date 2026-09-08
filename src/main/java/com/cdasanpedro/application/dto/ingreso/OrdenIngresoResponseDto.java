@@ -25,8 +25,13 @@ public class OrdenIngresoResponseDto {
     private EstadoOrden estado;
     private Boolean conductorEsPropietario;
     private UUID ordenPadreId;
+    private Long consecutivoOrdenPadre;
     private Boolean esReinspeccion;
     private Integer diasTranscurridosRechazo;
+    private Long diasRestantesReinspeccion;
+    private Boolean esReinspeccionVigente;
+    private OffsetDateTime fechaLimiteReinspeccion;
+    private java.util.List<String> pruebasRechazadasPrevias;
     private VehiculoResponseDto vehiculo;
     private ClienteResponseDto conductor;
     private String usuarioNombre;

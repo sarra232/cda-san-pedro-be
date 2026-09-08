@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
@@ -36,6 +37,7 @@ public class SiigoInvoiceService {
     private final SiigoProperties properties;
     private final PdfGeneratorService pdfGeneratorService;
     private final NotificationGateway notificationGateway;
+    private final com.cdasanpedro.application.usecase.notificacion.NotificacionService notificacionService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Transactional
@@ -100,13 +102,21 @@ public class SiigoInvoiceService {
             log.info(">> [SIIGO DIAN] Factura {} emitida exitosamente con CUFE: {}",
                     factura.getNumeroFactura(), cufe);
 
-            // 5. Despacho obligatorio de correo con PDF DIAN adjunto por ley
+            // 5. Despacho obligatorio de correo con PDF DIAN adjunto por ley (solo tras emisión exitosa)
             despacharCorreoFacturaDian(factura, dianEntity);
+
+            // 6. Despacho de WhatsApp con datos oficiales de SIIGO
+            despacharWhatsAppFacturaDian(factura, dianEntity);
 
         } catch (Exception e) {
             log.error(">> [SIIGO DIAN] Error al emitir factura {}: {}", factura.getNumeroFactura(), e.getMessage());
             dianEntity.setEstadoDian(EstadoFacturaDian.FALLIDA);
-            dianEntity.setMensajeRespuesta("Fallo en transmisión: " + e.getMessage());
+            
+            String errorMsg = e.getMessage() != null ? e.getMessage() : "Error desconocido en comunicación con SIIGO";
+            if (errorMsg.contains("timed out") || errorMsg.contains("Timeout") || errorMsg.contains("SocketTimeoutException")) {
+                errorMsg = "Tiempo de espera agotado al comunicar con SIIGO Cloud (Timeout). Puede reintentar la emisión fiscal.";
+            }
+            dianEntity.setMensajeRespuesta("Fallo en transmisión: " + errorMsg);
         }
 
         FacturaElectronicaDianEntity guardada = dianRepository.save(dianEntity);
@@ -150,11 +160,15 @@ public class SiigoInvoiceService {
 
         if (factura.getItems() != null && !factura.getItems().isEmpty()) {
             for (ItemFacturaEntity it : factura.getItems()) {
+                BigDecimal basePrice = it.getValorUnitario();
+                if (!esReinspeccion && itemTaxes != null && !itemTaxes.isEmpty() && basePrice != null && basePrice.compareTo(BigDecimal.ZERO) > 0) {
+                    basePrice = basePrice.divide(new BigDecimal("1.19"), 2, RoundingMode.HALF_UP);
+                }
                 items.add(SiigoInvoiceRequestDto.InvoiceItemDto.builder()
                         .code(mapeo.getCodigoProductoSiigo())
                         .description(it.getDescripcion())
                         .quantity(it.getCantidad())
-                        .price(it.getValorUnitario())
+                        .price(basePrice)
                         .discount(BigDecimal.ZERO)
                         .taxes(itemTaxes)
                         .build());
@@ -164,7 +178,7 @@ public class SiigoInvoiceService {
                     .code(mapeo.getCodigoProductoSiigo())
                     .description(mapeo.getDescripcionSiigo())
                     .quantity(1)
-                    .price(factura.getSubtotal())
+                    .price(factura.getSubtotal() != null ? factura.getSubtotal() : BigDecimal.ZERO)
                     .discount(BigDecimal.ZERO)
                     .taxes(itemTaxes)
                     .build());
@@ -259,7 +273,7 @@ public class SiigoInvoiceService {
         return pdfGeneratorService.generarFacturaPdf(factura);
     }
 
-    private void despacharCorreoFacturaDian(FacturaEntity factura, FacturaElectronicaDianEntity dianEntity) {
+    public void despacharCorreoFacturaDian(FacturaEntity factura, FacturaElectronicaDianEntity dianEntity) {
         if (factura.getClienteFactura() == null || factura.getClienteFactura().getEmail() == null || factura.getClienteFactura().getEmail().isBlank()) {
             log.info(">> [SIIGO DIAN] El cliente no tiene correo registrado, se omite el envío de email.");
             return;
@@ -314,6 +328,43 @@ public class SiigoInvoiceService {
             log.info(">> [SIIGO DIAN] Correo legal con PDF adjunto despachado a {}", factura.getClienteFactura().getEmail());
         } catch (Exception e) {
             log.error(">> [SIIGO DIAN] Error al despachar correo legal con PDF: {}", e.getMessage(), e);
+        }
+    }
+
+    public void despacharWhatsAppFacturaDian(FacturaEntity factura, FacturaElectronicaDianEntity dianEntity) {
+        try {
+            ClienteEntity pagador = factura.getClienteFactura();
+            if (pagador != null && pagador.getCelular() != null && !pagador.getCelular().isBlank()) {
+                String placa = factura.getOrdenIngreso() != null && factura.getOrdenIngreso().getVehiculo() != null
+                        ? factura.getOrdenIngreso().getVehiculo().getPlaca()
+                        : "N/A";
+                String numFacturaOficial = dianEntity.getNumeroFacturaSiigo() != null
+                        ? dianEntity.getNumeroFacturaSiigo()
+                        : factura.getNumeroFactura();
+
+                String mensajeTexto = String.format(
+                        "¡Hola %s! En CDA San Pedro confirmamos la emisión de tu Factura Electrónica %s para el vehículo %s por valor de $%s. Puedes consultar tu factura oficial DIAN en: %s",
+                        pagador.getNombresRazonSocial(),
+                        numFacturaOficial,
+                        placa,
+                        factura.getTotal().toPlainString(),
+                        dianEntity.getPdfSiigoUrl() != null ? dianEntity.getPdfSiigoUrl() : "https://cdasanpedro.com"
+                );
+
+                notificacionService.encolarNotificacion(
+                        pagador,
+                        "FACTURA_EMISION_DIAN",
+                        "WHATSAPP",
+                        pagador.getCelular(),
+                        "Factura Electrónica " + numFacturaOficial + " - CDA San Pedro",
+                        String.format("{\"mensaje\": \"%s\", \"numeroFactura\": \"%s\", \"placa\": \"%s\", \"total\": \"%s\", \"url\": \"%s\"}",
+                                mensajeTexto, numFacturaOficial, placa, factura.getTotal().toPlainString(),
+                                dianEntity.getPdfSiigoUrl() != null ? dianEntity.getPdfSiigoUrl() : "")
+                );
+                notificacionService.despacharColaPendiente();
+            }
+        } catch (Exception e) {
+            log.warn(">> [SIIGO DIAN] No se pudo encolar WhatsApp: {}", e.getMessage());
         }
     }
 

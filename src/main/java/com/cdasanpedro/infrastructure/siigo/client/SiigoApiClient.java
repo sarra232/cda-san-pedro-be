@@ -20,7 +20,12 @@ public class SiigoApiClient {
     private final RestClient.Builder restClientBuilder;
 
     private RestClient getClient(String bearerToken) {
+        org.springframework.http.client.SimpleClientHttpRequestFactory requestFactory = new org.springframework.http.client.SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(java.time.Duration.ofSeconds(10));
+        requestFactory.setReadTimeout(java.time.Duration.ofSeconds(20));
+
         return restClientBuilder
+                .requestFactory(requestFactory)
                 .baseUrl(siigoProperties.getApiUrl())
                 .defaultHeader("Partner-Id", "CDASanPedro")
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + bearerToken)

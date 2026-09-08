@@ -44,11 +44,13 @@ class FacturaServiceTest {
     @Mock
     private OrdenIngresoService ordenIngresoService;
     @Mock
-    private PdfGeneratorService pdfGeneratorService;
+    private FacturaElectronicaDianRepository dianRepository;
     @Mock
     private com.cdasanpedro.application.usecase.notificacion.NotificacionService notificacionService;
     @Mock
     private com.cdasanpedro.application.usecase.tarifa.TarifaService tarifaService;
+    @Mock
+    private com.cdasanpedro.application.usecase.siigo.SiigoInvoiceService siigoInvoiceService;
 
     @InjectMocks
     private FacturaService facturaService;

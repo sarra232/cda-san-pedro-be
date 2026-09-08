@@ -34,23 +34,66 @@ public class SiigoCustomerService {
         boolean esEmpresa = cliente.getTipoDocumento() == TipoDocumento.NIT;
         String personType = esEmpresa ? "Company" : "Person";
         String rawDoc = cliente.getNumeroDocumento().trim();
-        String cleanDoc = rawDoc.replace(".", "").replace(" ", "").trim();
+        String cleanDoc = rawDoc.replace(".", "").replace(" ", "").replace("-", "").trim();
         String checkDigit = null;
 
-        if (esEmpresa && cleanDoc.contains("-")) {
-            String[] parts = cleanDoc.split("-");
-            cleanDoc = parts[0].trim();
+        if (esEmpresa && rawDoc.contains("-")) {
+            String[] parts = rawDoc.split("-");
+            cleanDoc = parts[0].replaceAll("[^0-9]", "").trim();
             if (parts.length > 1 && !parts[1].trim().isBlank()) {
-                checkDigit = parts[1].trim();
+                checkDigit = parts[1].replaceAll("[^0-9]", "").trim();
             }
         }
 
         String nombreCompleto = cliente.getNombresRazonSocial() != null ? cliente.getNombresRazonSocial().trim() : "CLIENTE GENERAL";
-        List<String> names = List.of(nombreCompleto);
+        List<String> names;
+        if (esEmpresa) {
+            names = List.of(nombreCompleto);
+        } else {
+            String[] parts = nombreCompleto.split("\\s+", 2);
+            if (parts.length > 1 && !parts[1].trim().isBlank()) {
+                names = List.of(parts[0].trim(), parts[1].trim());
+            } else {
+                names = List.of(nombreCompleto.trim(), ".");
+            }
+        }
 
         List<SiigoCustomerRequestDto.FiscalResponsibilityDto> fiscalList = esEmpresa
                 ? List.of(SiigoCustomerRequestDto.FiscalResponsibilityDto.builder().code("O-48").build())
                 : List.of(SiigoCustomerRequestDto.FiscalResponsibilityDto.builder().code("R-99-PN").build());
+
+        // Sanitización estricta de teléfono: solo dígitos numéricos (máximo 10 caracteres)
+        List<SiigoCustomerRequestDto.CustomerPhoneDto> phonesList = Collections.emptyList();
+        if (cliente.getCelular() != null && !cliente.getCelular().isBlank()) {
+            String cleanPhone = cliente.getCelular().replaceAll("[^0-9]", "").trim();
+            if (!cleanPhone.isEmpty()) {
+                String indic = "57";
+                String num = cleanPhone;
+                if (cleanPhone.startsWith("57") && cleanPhone.length() > 10) {
+                    num = cleanPhone.substring(2);
+                }
+                if (num.length() > 10) {
+                    num = num.substring(num.length() - 10);
+                }
+                if (num.length() >= 7) {
+                    phonesList = List.of(SiigoCustomerRequestDto.CustomerPhoneDto.builder()
+                            .indicative(indic)
+                            .number(num)
+                            .build());
+                }
+            }
+        }
+
+        // Sanitización de contactos
+        List<SiigoCustomerRequestDto.CustomerContactDto> contactsList = Collections.emptyList();
+        if (cliente.getEmail() != null && !cliente.getEmail().isBlank() && cliente.getEmail().contains("@")) {
+            contactsList = List.of(SiigoCustomerRequestDto.CustomerContactDto.builder()
+                    .firstName(names.get(0))
+                    .lastName(names.size() > 1 ? names.get(1) : ".")
+                    .email(cliente.getEmail().trim().toLowerCase())
+                    .phone(!phonesList.isEmpty() ? phonesList.get(0) : null)
+                    .build());
+        }
 
         SiigoCustomerRequestDto.SiigoCustomerRequestDtoBuilder builder = SiigoCustomerRequestDto.builder()
                 .type("Customer")
@@ -63,15 +106,8 @@ public class SiigoCustomerService {
                 .active(true)
                 .vatResponsible(esEmpresa)
                 .fiscalResponsibilities(fiscalList)
-                .phones(cliente.getCelular() != null && !cliente.getCelular().isBlank() ?
-                        List.of(SiigoCustomerRequestDto.CustomerPhoneDto.builder().indicative("57").number(cliente.getCelular().trim()).build()) :
-                        Collections.emptyList())
-                .contacts(cliente.getEmail() != null && !cliente.getEmail().isBlank() ?
-                        List.of(SiigoCustomerRequestDto.CustomerContactDto.builder()
-                                .firstName(nombreCompleto)
-                                .email(cliente.getEmail().trim())
-                                .build()) :
-                        Collections.emptyList());
+                .phones(phonesList)
+                .contacts(contactsList);
 
         if (cliente.getDireccion() != null && !cliente.getDireccion().isBlank()) {
             builder.address(SiigoCustomerRequestDto.CustomerAddressDto.builder()
@@ -99,16 +135,30 @@ public class SiigoCustomerService {
 
         try {
             String token = authService.getValidToken();
+            log.info(">> [SIIGO] Registrando cliente fiscal en SIIGO: Doc={}, Nombres={}, Phones={}", cleanDoc, names, phonesList.stream().map(p -> p.getIndicative() + "-" + p.getNumber()).toList());
             return apiClient.createCustomer(request, token);
         } catch (Exception e) {
-            log.warn(">> [SIIGO] Error al sincronizar cliente en SIIGO (puede ya existir): {}", e.getMessage());
-            return SiigoCustomerResponseDto.builder()
-                    .id("existing_" + cleanDoc)
-                    .identification(cleanDoc)
-                    .idType(idType)
-                    .commercialName(nombreCompleto)
-                    .active(true)
-                    .build();
+            log.warn(">> [SIIGO] Error en creación de cliente {} ({}). Verificando si ya existe previamente en SIIGO...", cleanDoc, e.getMessage());
+            try {
+                String token = authService.getValidToken();
+                SiigoCustomerListResponseDto busqueda = apiClient.getCustomerByIdentification(cleanDoc, token);
+                if (busqueda != null && busqueda.getResults() != null && !busqueda.getResults().isEmpty()) {
+                    SiigoCustomerListResponseDto.CustomerItemDto item = busqueda.getResults().get(0);
+                    log.info(">> [SIIGO] Cliente {} localizado exitosamente en SIIGO con ID: {}", cleanDoc, item.getId());
+                    return SiigoCustomerResponseDto.builder()
+                            .id(item.getId())
+                            .identification(item.getIdentification())
+                            .idType(idType)
+                            .commercialName(nombreCompleto)
+                            .active(true)
+                            .build();
+                }
+            } catch (Exception ex) {
+                log.error(">> [SIIGO] Error al consultar existencia previa del cliente {}: {}", cleanDoc, ex.getMessage());
+            }
+
+            log.error(">> [SIIGO ERROR CRÍTICO] El cliente {} no pudo sincronizarse con SIIGO: {}", cleanDoc, e.getMessage());
+            throw new IllegalStateException("Error al sincronizar cliente en SIIGO: " + e.getMessage(), e);
         }
     }
 

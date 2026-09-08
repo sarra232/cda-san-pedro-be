@@ -20,5 +20,6 @@ public class ReinspeccionVerificacionDto {
     private OffsetDateTime fechaLimite15Dias;
     private long diasTranscurridos;
     private long diasRestantes;
+    private java.util.List<String> pruebasRechazadas;
     private String mensaje;
 }

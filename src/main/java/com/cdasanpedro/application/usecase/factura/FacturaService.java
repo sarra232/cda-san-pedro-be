@@ -38,6 +38,7 @@ import java.util.stream.Collectors;
 public class FacturaService {
 
     private final FacturaRepository facturaRepository;
+    private final FacturaElectronicaDianRepository dianRepository;
     private final OrdenIngresoRepository ordenIngresoRepository;
     private final VehiculoRepository vehiculoRepository;
     private final ClienteRepository clienteRepository;
@@ -48,6 +49,7 @@ public class FacturaService {
     private final NotificationGateway notificationGateway;
     private final com.cdasanpedro.application.usecase.notificacion.NotificacionService notificacionService;
     private final com.cdasanpedro.application.usecase.tarifa.TarifaService tarifaService;
+    private final com.cdasanpedro.application.usecase.siigo.SiigoInvoiceService siigoInvoiceService;
 
     private static final BigDecimal FACTOR_IVA = new BigDecimal("1.19");
 
@@ -105,8 +107,12 @@ public class FacturaService {
         }
 
         // Desglose de IVA 19%
-        BigDecimal subtotal = totalBruto.divide(FACTOR_IVA, 2, RoundingMode.HALF_UP);
-        BigDecimal iva = totalBruto.subtract(subtotal);
+        BigDecimal subtotal = totalBruto.compareTo(BigDecimal.ZERO) == 0 
+                ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP) 
+                : totalBruto.divide(FACTOR_IVA, 2, RoundingMode.HALF_UP);
+        BigDecimal iva = totalBruto.compareTo(BigDecimal.ZERO) == 0 
+                ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP) 
+                : totalBruto.subtract(subtotal);
         BigDecimal total = totalBruto.setScale(2, RoundingMode.HALF_UP);
 
         // Generar número de factura (FAC- + timestamp/consecutivo)
@@ -137,8 +143,16 @@ public class FacturaService {
         orden.setEstado(EstadoOrden.FACTURADO);
         ordenIngresoRepository.save(orden);
 
-        // 7. Despacho automático de la factura al cliente/pagador (WhatsApp / Correo)
-        despacharNotificacionFactura(guardada);
+        // 7. Desencadenar la emisión electrónica SIIGO/DIAN en segundo plano
+        // Tras ser validada por SIIGO, se despachará automáticamente el correo legal y WhatsApp oficial.
+        // Si falla o se agota el tiempo de espera, quedará en estado FALLIDA para reintento manual sin emitir correos preliminares.
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            try {
+                siigoInvoiceService.emitirFacturaDian(guardada.getId());
+            } catch (Exception ex) {
+                log.error(">> [FacturaService] Error en emisión electrónica automática SIIGO/DIAN: {}", ex.getMessage());
+            }
+        });
 
         return toDto(guardada);
     }
@@ -147,70 +161,16 @@ public class FacturaService {
     public void enviarFacturaCliente(UUID facturaId) {
         FacturaEntity factura = facturaRepository.findById(facturaId)
                 .orElseThrow(() -> new ResourceNotFoundException("Factura no encontrada con ID: " + facturaId));
-        despacharNotificacionFactura(factura);
-    }
 
-    private void despacharNotificacionFactura(FacturaEntity factura) {
-        try {
-            ClienteEntity pagador = factura.getClienteFactura();
-            if (pagador != null) {
-                String placa = factura.getOrdenIngreso() != null && factura.getOrdenIngreso().getVehiculo() != null
-                        ? factura.getOrdenIngreso().getVehiculo().getPlaca()
-                        : "N/A";
-
-                String mensajeTexto = String.format(
-                        "¡Hola %s! En CDA San Pedro agradecemos tu visita. Tu factura de venta %s para el vehículo %s por valor de $%s (%s) ha sido emitida exitosamente. ¡Seguridad y precisión para tu vehículo!",
-                        pagador.getNombresRazonSocial(),
-                        factura.getNumeroFactura(),
-                        placa,
-                        factura.getTotal().toPlainString(),
-                        factura.getMetodoPago()
-                );
-
-                // 1. WhatsApp
-                if (pagador.getCelular() != null && !pagador.getCelular().isBlank()) {
-                    notificacionService.encolarNotificacion(
-                            pagador,
-                            "FACTURA_EMISION",
-                            "WHATSAPP",
-                            pagador.getCelular(),
-                            "Factura de Venta " + factura.getNumeroFactura() + " - CDA San Pedro",
-                            String.format("{\"mensaje\": \"%s\", \"numeroFactura\": \"%s\", \"placa\": \"%s\", \"total\": \"%s\"}",
-                                    mensajeTexto, factura.getNumeroFactura(), placa, factura.getTotal().toPlainString())
-                    );
-                    notificacionService.despacharColaPendiente();
-                }
-
-                // 2. Email Oficial con PDF Adjunto Legal
-                if (pagador.getEmail() != null && !pagador.getEmail().isBlank()) {
-                    try {
-                        byte[] pdfBytes = pdfGeneratorService.generarFacturaPdf(factura);
-                        String htmlBody = EmailTemplateBuilder.buildComprobantePago(
-                                pagador.getNombresRazonSocial(),
-                                placa,
-                                factura.getNumeroFactura(),
-                                factura.getTotal(),
-                                factura.getMetodoPago() != null ? factura.getMetodoPago().name() : "EFECTIVO",
-                                null,
-                                null
-                        );
-
-                        String attachmentName = "Factura_" + factura.getNumeroFactura().replace(" ", "_") + ".pdf";
-                        notificationGateway.sendEmail(
-                                pagador.getEmail().trim(),
-                                "🧾 Comprobante Oficial Factura " + factura.getNumeroFactura() + " - CDA San Pedro (PDF Adjunto)",
-                                htmlBody,
-                                pdfBytes,
-                                attachmentName
-                        );
-                        log.info(">> [FacturaService] Correo con PDF de factura {} enviado a {}", factura.getNumeroFactura(), pagador.getEmail());
-                    } catch (Exception exMail) {
-                        log.error(">> [FacturaService] Error enviando correo con PDF de factura {}: {}", factura.getNumeroFactura(), exMail.getMessage(), exMail);
-                    }
-                }
+        var dianOpt = dianRepository.findByFacturaId(facturaId);
+        if (dianOpt.isPresent() && dianOpt.get().getEstadoDian() == com.cdasanpedro.core.model.enums.EstadoFacturaDian.EMITIDA) {
+            siigoInvoiceService.despacharCorreoFacturaDian(factura, dianOpt.get());
+        } else {
+            // Intentar emitir primero ante SIIGO
+            var dianResp = siigoInvoiceService.emitirFacturaDian(facturaId);
+            if (dianResp.getEstadoDian() != com.cdasanpedro.core.model.enums.EstadoFacturaDian.EMITIDA) {
+                throw new BusinessException("No se pudo enviar el correo oficial. La factura aún no ha sido emitida exitosamente ante la DIAN/SIIGO. Detalle: " + dianResp.getMensajeRespuesta());
             }
-        } catch (Exception e) {
-            log.error("Error al despachar notificación de factura {}: {}", factura.getNumeroFactura(), e.getMessage());
         }
     }
 
@@ -307,7 +267,7 @@ public class FacturaService {
                         .build()).collect(Collectors.toList())
                 : new ArrayList<>();
 
-        return FacturaResponseDto.builder()
+        var builder = FacturaResponseDto.builder()
                 .id(entity.getId())
                 .numeroFactura(entity.getNumeroFactura())
                 .consecutivo(entity.getConsecutivo())
@@ -321,7 +281,18 @@ public class FacturaService {
                 .ordenIngreso(ordenDto)
                 .usuarioNombre(entity.getUsuario() != null ? entity.getUsuario().getNombresApellidos() : null)
                 .items(itemsDto)
-                .createdAt(entity.getCreatedAt())
-                .build();
+                .createdAt(entity.getCreatedAt());
+
+        if (dianRepository != null && entity.getId() != null) {
+            dianRepository.findByFacturaId(entity.getId()).ifPresent(dian -> {
+                builder.estadoDian(dian.getEstadoDian())
+                        .numeroFacturaSiigo(dian.getNumeroFacturaSiigo())
+                        .pdfSiigoUrl(dian.getPdfSiigoUrl())
+                        .cufe(dian.getCufe())
+                        .mensajeRespuestaDian(dian.getMensajeRespuesta());
+            });
+        }
+
+        return builder.build();
     }
 }

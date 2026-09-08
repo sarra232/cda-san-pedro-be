@@ -22,6 +22,9 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import com.cdasanpedro.infrastructure.persistence.repository.PruebaInspeccionRepository;
+import com.cdasanpedro.core.model.enums.EstadoPrueba;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -30,6 +33,7 @@ public class ReinspeccionService {
     private final ReinspeccionSeguimientoRepository reinspeccionRepository;
     private final OrdenIngresoRepository ordenIngresoRepository;
     private final NotificacionRepository notificacionRepository;
+    private final PruebaInspeccionRepository pruebaInspeccionRepository;
 
     @Transactional(readOnly = true)
     public List<ReinspeccionSeguimientoResponseDto> listarSeguimientos() {
@@ -62,6 +66,15 @@ public class ReinspeccionService {
 
         boolean vigente = diasRestantes >= 0 && diasTranscurridos <= 15;
 
+        List<String> pruebasFallidas = java.util.Collections.emptyList();
+        if (seguimiento.getOrdenRechazada() != null) {
+            pruebasFallidas = pruebaInspeccionRepository.findByOrdenIngresoIdOrderByCreatedAtAsc(seguimiento.getOrdenRechazada().getId())
+                    .stream()
+                    .filter(p -> p.getEstado() == EstadoPrueba.RECHAZADO)
+                    .map(p -> p.getTipoPrueba().name())
+                    .collect(Collectors.toList());
+        }
+
         return ReinspeccionVerificacionDto.builder()
                 .tieneReinspeccionGratuita(vigente)
                 .ordenRechazadaId(seguimiento.getOrdenRechazada().getId())
@@ -71,6 +84,7 @@ public class ReinspeccionService {
                 .fechaLimite15Dias(seguimiento.getFechaLimite15Dias())
                 .diasTranscurridos(diasTranscurridos)
                 .diasRestantes(Math.max(0, diasRestantes))
+                .pruebasRechazadas(pruebasFallidas)
                 .mensaje(vigente ?
                         "Reinspección gratuita vigente (Día " + (diasTranscurridos + 1) + " de 15. Quedan " + diasRestantes + " días)." :
                         "Plazo legal de 15 días calendario vencido hace " + Math.abs(diasRestantes) + " días.")

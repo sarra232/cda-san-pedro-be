@@ -124,12 +124,34 @@ public class OrdenIngresoService {
             reinspeccionService.registrarReingreso(guardada.getId(), request.getOrdenPadreId());
         }
 
-        // 5. Inicializar las 4 Pruebas Técnicas Reglamentarias en estado PENDIENTE
+        // 5. Inicializar las 4 Pruebas Técnicas Reglamentarias
+        List<PruebaInspeccionEntity> pruebasPadre = (ordenPadre != null)
+                ? pruebaInspeccionRepository.findByOrdenIngresoIdOrderByCreatedAtAsc(ordenPadre.getId())
+                : java.util.Collections.emptyList();
+
         for (TipoPrueba tipo : TipoPrueba.values()) {
+            PruebaInspeccionEntity pruebaPadre = pruebasPadre.stream()
+                    .filter(p -> p.getTipoPrueba() == tipo)
+                    .findFirst()
+                    .orElse(null);
+
+            EstadoPrueba estadoInicial = EstadoPrueba.PENDIENTE;
+            String obsInicial = null;
+
+            if (pruebaPadre != null && pruebaPadre.getEstado() == EstadoPrueba.APROBADO) {
+                estadoInicial = EstadoPrueba.APROBADO;
+                obsInicial = "Aprobado en revisión inicial #" + ordenPadre.getConsecutivo();
+            } else if (pruebaPadre != null && pruebaPadre.getEstado() == EstadoPrueba.RECHAZADO) {
+                obsInicial = "Requiere reinspección obligatoria (Reprobado en orden #" + ordenPadre.getConsecutivo() + ")";
+            }
+
             PruebaInspeccionEntity prueba = PruebaInspeccionEntity.builder()
                     .ordenIngreso(guardada)
                     .tipoPrueba(tipo)
-                    .estado(EstadoPrueba.PENDIENTE)
+                    .estado(estadoInicial)
+                    .observaciones(obsInicial)
+                    .usuarioResponsable(estadoInicial == EstadoPrueba.APROBADO ? usuario : null)
+                    .fechaEjecucion(estadoInicial == EstadoPrueba.APROBADO ? OffsetDateTime.now() : null)
                     .build();
             pruebaInspeccionRepository.save(prueba);
         }
@@ -275,6 +297,29 @@ public class OrdenIngresoService {
                 ? clienteService.toDto(entity.getConductor()) 
                 : null;
 
+        Long diasRestantes = null;
+        Boolean esVigente = null;
+        OffsetDateTime fechaLimite = null;
+        Long consecutivoPadre = entity.getOrdenPadre() != null ? entity.getOrdenPadre().getConsecutivo() : null;
+        List<String> pruebasFallidasPadre = null;
+
+        if (entity.getEstado() == EstadoOrden.RECHAZADO) {
+            OffsetDateTime fechaBase = entity.getFechaIngreso() != null ? entity.getFechaIngreso() : entity.getCreatedAt();
+            fechaLimite = fechaBase.plusDays(15);
+            long transcurridos = java.time.temporal.ChronoUnit.DAYS.between(fechaBase, OffsetDateTime.now());
+            long restantes = java.time.temporal.ChronoUnit.DAYS.between(OffsetDateTime.now(), fechaLimite);
+            diasRestantes = Math.max(0, restantes);
+            esVigente = restantes >= 0 && transcurridos <= 15;
+        }
+
+        if (entity.getOrdenPadre() != null) {
+            pruebasFallidasPadre = pruebaInspeccionRepository.findByOrdenIngresoIdOrderByCreatedAtAsc(entity.getOrdenPadre().getId())
+                    .stream()
+                    .filter(p -> p.getEstado() == EstadoPrueba.RECHAZADO)
+                    .map(p -> p.getTipoPrueba().name())
+                    .collect(Collectors.toList());
+        }
+
         return OrdenIngresoResponseDto.builder()
                 .id(entity.getId())
                 .consecutivo(entity.getConsecutivo())
@@ -284,8 +329,13 @@ public class OrdenIngresoService {
                 .estado(entity.getEstado())
                 .conductorEsPropietario(entity.getConductorEsPropietario())
                 .ordenPadreId(entity.getOrdenPadre() != null ? entity.getOrdenPadre().getId() : null)
+                .consecutivoOrdenPadre(consecutivoPadre)
                 .esReinspeccion(entity.getEsReinspeccion())
                 .diasTranscurridosRechazo(entity.getDiasTranscurridosRechazo())
+                .diasRestantesReinspeccion(diasRestantes)
+                .esReinspeccionVigente(esVigente)
+                .fechaLimiteReinspeccion(fechaLimite)
+                .pruebasRechazadasPrevias(pruebasFallidasPadre)
                 .vehiculo(vehDto)
                 .conductor(condDto)
                 .usuarioNombre(entity.getUsuario() != null ? entity.getUsuario().getNombresApellidos() : "Sistema")

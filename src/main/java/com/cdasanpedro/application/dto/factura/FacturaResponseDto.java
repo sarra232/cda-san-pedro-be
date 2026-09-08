@@ -36,4 +36,11 @@ public class FacturaResponseDto {
     @Builder.Default
     private List<ItemFacturaResponseDto> items = new ArrayList<>();
     private OffsetDateTime createdAt;
+
+    // Campos de Integración Fiscal SIIGO / DIAN
+    private com.cdasanpedro.core.model.enums.EstadoFacturaDian estadoDian;
+    private String numeroFacturaSiigo;
+    private String pdfSiigoUrl;
+    private String cufe;
+    private String mensajeRespuestaDian;
 }
