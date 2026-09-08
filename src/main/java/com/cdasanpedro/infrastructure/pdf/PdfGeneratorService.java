@@ -84,7 +84,7 @@ public class PdfGeneratorService {
             cDir.setAlignment(Element.ALIGN_RIGHT);
             companyCell.addElement(cDir);
 
-            Paragraph cTel = new Paragraph("Tel: (604) 862-7000 | Cel/WhatsApp: 312 890 4567", FontFactory.getFont(FontFactory.HELVETICA, 8, Color.DARK_GRAY));
+            Paragraph cTel = new Paragraph("Tel: (604) 868 6060 | Cel/WhatsApp: 311 345 6789", FontFactory.getFont(FontFactory.HELVETICA, 8, Color.DARK_GRAY));
             cTel.setAlignment(Element.ALIGN_RIGHT);
             companyCell.addElement(cTel);
 

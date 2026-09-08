@@ -15,4 +15,8 @@ public interface NotificacionRepository extends JpaRepository<NotificacionEntity
     
     @Query("SELECT n FROM NotificacionEntity n WHERE n.estado = 'PENDIENTE' AND n.fechaProgramada <= :now ORDER BY n.fechaProgramada ASC")
     List<NotificacionEntity> findPendientesParaEnvio(@Param("now") OffsetDateTime now);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("UPDATE NotificacionEntity n SET n.estado = 'CANCELADO' WHERE n.cliente.id = :clienteId AND n.tipo = :tipo AND n.estado = 'PENDIENTE'")
+    int cancelarPendientesPorClienteYTipo(@Param("clienteId") UUID clienteId, @Param("tipo") String tipo);
 }

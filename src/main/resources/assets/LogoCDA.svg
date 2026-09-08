@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 120" width="100%" height="100%">
+  <defs>
+    <linearGradient id="cdaGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FBBF24" />
+      <stop offset="50%" stop-color="#F59E0B" />
+      <stop offset="100%" stop-color="#D97706" />
+    </linearGradient>
+    <linearGradient id="cdaDark" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1F2937" />
+      <stop offset="100%" stop-color="#111827" />
+    </linearGradient>
+    <filter id="goldGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- ISOTIPO: Escudo de Diagnóstico y Precisión Automotor -->
+  <g transform="translate(15, 10)">
+    <!-- Base Hexagonal / Escudo -->
+    <polygon points="50,5 90,28 90,75 50,98 10,75 10,28" fill="url(#cdaDark)" stroke="url(#cdaGold)" stroke-width="4" stroke-linejoin="round" />
+    
+    <!-- Anillo de velocímetro / engranaje interior -->
+    <circle cx="50" cy="51" r="32" fill="none" stroke="#374151" stroke-width="3" stroke-dasharray="4 2" />
+    
+    <!-- Trayectoria de Check / Precisión Automotriz -->
+    <path d="M 32 52 L 45 65 L 72 36" fill="none" stroke="url(#cdaGold)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" filter="url(#goldGlow)" />
+    
+    <!-- Destellos dorados en vértices -->
+    <circle cx="50" cy="5" r="3" fill="#FBBF24" />
+    <circle cx="90" cy="28" r="3" fill="#FBBF24" />
+    <circle cx="90" cy="75" r="3" fill="#FBBF24" />
+    <circle cx="50" cy="98" r="3" fill="#FBBF24" />
+    <circle cx="10" cy="75" r="3" fill="#FBBF24" />
+    <circle cx="10" cy="28" r="3" fill="#FBBF24" />
+  </g>
+
+  <!-- TIPOGRAFÍA: CDA SAN PEDRO -->
+  <g transform="translate(130, 20)">
+    <!-- Texto CDA -->
+    <text x="0" y="44" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="44" font-weight="900" fill="url(#cdaGold)" letter-spacing="3">CDA</text>
+    
+    <!-- Texto SAN PEDRO -->
+    <text x="110" y="44" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="44" font-weight="900" fill="#FFFFFF" letter-spacing="3">SAN PEDRO</text>
+    
+    <!-- Línea decorativa dorada -->
+    <line x1="2" y1="56" x2="350" y2="56" stroke="url(#cdaGold)" stroke-width="2.5" stroke-linecap="round" />
+    
+    <!-- Subtítulo: CENTRO DE DIAGNÓSTICO AUTOMOTOR -->
+    <text x="3" y="74" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#94A3B8" letter-spacing="2.5">CENTRO DE DIAGNÓSTICO AUTOMOTOR</text>
+  </g>
+</svg>

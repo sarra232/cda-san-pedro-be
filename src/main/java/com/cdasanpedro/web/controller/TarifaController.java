@@ -10,6 +10,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -39,6 +40,7 @@ public class TarifaController {
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<ApiResponse<TarifaResponseDto>> crearTarifa(
             @Valid @RequestBody TarifaCreateRequestDto request,
             Authentication authentication
@@ -50,6 +52,7 @@ public class TarifaController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<ApiResponse<TarifaResponseDto>> actualizarTarifa(
             @PathVariable UUID id,
             @Valid @RequestBody TarifaUpdateRequestDto request,
@@ -61,6 +64,7 @@ public class TarifaController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<ApiResponse<Void>> eliminarTarifa(
             @PathVariable UUID id,
             Authentication authentication

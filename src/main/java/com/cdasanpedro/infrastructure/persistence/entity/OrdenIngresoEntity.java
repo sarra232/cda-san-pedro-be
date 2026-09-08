@@ -52,6 +52,22 @@ public class OrdenIngresoEntity {
     @JoinColumn(name = "usuario_id", nullable = false)
     private UsuarioEntity usuario;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "orden_padre_id")
+    private OrdenIngresoEntity ordenPadre;
+
+    @Column(name = "es_reinspeccion", nullable = false)
+    @Builder.Default
+    private Boolean esReinspeccion = false;
+
+    @Column(name = "dias_transcurridos_rechazo")
+    private Integer diasTranscurridosRechazo;
+
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    @Column(name = "metadata", columnDefinition = "jsonb", nullable = false)
+    @Builder.Default
+    private String metadata = "{}";
+
     @Column(name = "observaciones", columnDefinition = "TEXT")
     private String observaciones;
 

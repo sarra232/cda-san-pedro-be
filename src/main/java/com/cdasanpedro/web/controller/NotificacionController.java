@@ -34,4 +34,16 @@ public class NotificacionController {
         NotificacionResponseDto dto = notificacionService.reintentar(id);
         return ResponseEntity.ok(ApiResponse.ok(dto, "Reintento de notificación procesado"));
     }
+
+    @PostMapping("/test-email")
+    public ResponseEntity<ApiResponse<String>> enviarCorreoPrueba(@jakarta.validation.Valid @RequestBody com.cdasanpedro.application.dto.notificacion.TestEmailRequestDto request) {
+        notificacionService.enviarCorreoPrueba(request.getEmail(), request.getMensaje());
+        return ResponseEntity.ok(ApiResponse.ok("Despachando correo de prueba a " + request.getEmail(), "Correo en proceso de entrega"));
+    }
+
+    @PostMapping("/enviar-plantilla-real")
+    public ResponseEntity<ApiResponse<String>> enviarPlantillaReal(@jakarta.validation.Valid @RequestBody com.cdasanpedro.application.dto.notificacion.SendRealEmailRequestDto request) {
+        String msg = notificacionService.enviarPlantillaReal(request);
+        return ResponseEntity.ok(ApiResponse.ok(msg, "Plantilla transaccional enviada exitosamente"));
+    }
 }

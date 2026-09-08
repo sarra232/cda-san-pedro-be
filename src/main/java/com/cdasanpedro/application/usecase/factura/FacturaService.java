@@ -12,6 +12,8 @@ import com.cdasanpedro.core.exception.ResourceNotFoundException;
 import com.cdasanpedro.core.model.enums.CategoriaVehiculo;
 import com.cdasanpedro.core.model.enums.EstadoFactura;
 import com.cdasanpedro.core.model.enums.EstadoOrden;
+import com.cdasanpedro.core.gateway.NotificationGateway;
+import com.cdasanpedro.infrastructure.notification.EmailTemplateBuilder;
 import com.cdasanpedro.infrastructure.pdf.PdfGeneratorService;
 import com.cdasanpedro.infrastructure.persistence.entity.*;
 import com.cdasanpedro.infrastructure.persistence.repository.*;
@@ -43,6 +45,7 @@ public class FacturaService {
     private final ClienteService clienteService;
     private final OrdenIngresoService ordenIngresoService;
     private final PdfGeneratorService pdfGeneratorService;
+    private final NotificationGateway notificationGateway;
     private final com.cdasanpedro.application.usecase.notificacion.NotificacionService notificacionService;
     private final com.cdasanpedro.application.usecase.tarifa.TarifaService tarifaService;
 
@@ -81,11 +84,20 @@ public class FacturaService {
                         .build());
             }
         } else {
-            // Tarifa estándar según categoría del vehículo
-            BigDecimal tarifaTotal = getTarifaPorCategoria(orden.getVehiculo().getCategoria());
+            boolean esReinspeccionGratuita = Boolean.TRUE.equals(orden.getEsReinspeccion()) 
+                    || "REINSPECCION_GRATUITA".equalsIgnoreCase(orden.getTipoServicio());
+            
+            BigDecimal tarifaTotal = esReinspeccionGratuita 
+                    ? BigDecimal.ZERO 
+                    : getTarifaPorCategoria(orden.getVehiculo().getCategoria());
+            
+            String descripcion = esReinspeccionGratuita
+                    ? "2da Revisión / Reinspección RTM Gratuita (15 Días) - " + orden.getVehiculo().getPlaca()
+                    : "Revisión Técnico-Mecánica y Emisiones Contaminantes (" + orden.getVehiculo().getCategoria() + " - " + orden.getVehiculo().getPlaca() + ")";
+
             totalBruto = tarifaTotal;
             itemsEntity.add(ItemFacturaEntity.builder()
-                    .descripcion("Revisión Técnico-Mecánica y Emisiones Contaminantes (" + orden.getVehiculo().getCategoria() + " - " + orden.getVehiculo().getPlaca() + ")")
+                    .descripcion(descripcion)
                     .cantidad(1)
                     .valorUnitario(tarifaTotal)
                     .totalItem(tarifaTotal)
@@ -155,6 +167,7 @@ public class FacturaService {
                         factura.getMetodoPago()
                 );
 
+                // 1. WhatsApp
                 if (pagador.getCelular() != null && !pagador.getCelular().isBlank()) {
                     notificacionService.encolarNotificacion(
                             pagador,
@@ -165,22 +178,36 @@ public class FacturaService {
                             String.format("{\"mensaje\": \"%s\", \"numeroFactura\": \"%s\", \"placa\": \"%s\", \"total\": \"%s\"}",
                                     mensajeTexto, factura.getNumeroFactura(), placa, factura.getTotal().toPlainString())
                     );
+                    notificacionService.despacharColaPendiente();
                 }
 
+                // 2. Email Oficial con PDF Adjunto Legal
                 if (pagador.getEmail() != null && !pagador.getEmail().isBlank()) {
-                    notificacionService.encolarNotificacion(
-                            pagador,
-                            "FACTURA_EMISION",
-                            "EMAIL",
-                            pagador.getEmail(),
-                            "Comprobante Oficial Factura " + factura.getNumeroFactura() + " - CDA San Pedro",
-                            String.format("{\"mensaje\": \"%s\", \"numeroFactura\": \"%s\", \"placa\": \"%s\", \"total\": \"%s\"}",
-                                    mensajeTexto, factura.getNumeroFactura(), placa, factura.getTotal().toPlainString())
-                    );
-                }
+                    try {
+                        byte[] pdfBytes = pdfGeneratorService.generarFacturaPdf(factura);
+                        String htmlBody = EmailTemplateBuilder.buildComprobantePago(
+                                pagador.getNombresRazonSocial(),
+                                placa,
+                                factura.getNumeroFactura(),
+                                factura.getTotal(),
+                                factura.getMetodoPago() != null ? factura.getMetodoPago().name() : "EFECTIVO",
+                                null,
+                                null
+                        );
 
-                // Despachar inmediatamente
-                notificacionService.despacharColaPendiente();
+                        String attachmentName = "Factura_" + factura.getNumeroFactura().replace(" ", "_") + ".pdf";
+                        notificationGateway.sendEmail(
+                                pagador.getEmail().trim(),
+                                "🧾 Comprobante Oficial Factura " + factura.getNumeroFactura() + " - CDA San Pedro (PDF Adjunto)",
+                                htmlBody,
+                                pdfBytes,
+                                attachmentName
+                        );
+                        log.info(">> [FacturaService] Correo con PDF de factura {} enviado a {}", factura.getNumeroFactura(), pagador.getEmail());
+                    } catch (Exception exMail) {
+                        log.error(">> [FacturaService] Error enviando correo con PDF de factura {}: {}", factura.getNumeroFactura(), exMail.getMessage(), exMail);
+                    }
+                }
             }
         } catch (Exception e) {
             log.error("Error al despachar notificación de factura {}: {}", factura.getNumeroFactura(), e.getMessage());

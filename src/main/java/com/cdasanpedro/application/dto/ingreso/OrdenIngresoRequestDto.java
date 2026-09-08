@@ -45,6 +45,8 @@ public class OrdenIngresoRequestDto {
     // Conductor que ingresa el vehículo (si no es el propietario)
     private UUID conductorId;
     private ClienteRequestDto conductorData;
+    private UUID ordenPadreId;
+    private Boolean esReinspeccion;
 
     private String observaciones;
 }

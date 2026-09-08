@@ -3,6 +3,7 @@ package com.cdasanpedro.application.usecase.ingreso;
 import com.cdasanpedro.application.dto.cliente.ClienteResponseDto;
 import com.cdasanpedro.application.dto.ingreso.OrdenIngresoRequestDto;
 import com.cdasanpedro.application.dto.ingreso.OrdenIngresoResponseDto;
+import com.cdasanpedro.application.dto.vehiculo.VehiculoResponseDto;
 import com.cdasanpedro.application.usecase.cliente.ClienteService;
 import com.cdasanpedro.application.usecase.vehiculo.VehiculoService;
 import com.cdasanpedro.core.model.enums.CategoriaVehiculo;
@@ -15,6 +16,7 @@ import com.cdasanpedro.infrastructure.persistence.entity.UsuarioEntity;
 import com.cdasanpedro.infrastructure.persistence.entity.VehiculoEntity;
 import com.cdasanpedro.infrastructure.persistence.repository.ClienteRepository;
 import com.cdasanpedro.infrastructure.persistence.repository.OrdenIngresoRepository;
+import com.cdasanpedro.infrastructure.persistence.repository.PruebaInspeccionRepository;
 import com.cdasanpedro.infrastructure.persistence.repository.UsuarioRepository;
 import com.cdasanpedro.infrastructure.persistence.repository.VehiculoRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,6 +50,12 @@ class OrdenIngresoServiceTest {
     private ClienteService clienteService;
     @Mock
     private VehiculoService vehiculoService;
+    @Mock
+    private PruebaInspeccionRepository pruebaInspeccionRepository;
+    @Mock
+    private com.cdasanpedro.application.usecase.reinspeccion.ReinspeccionService reinspeccionService;
+    @Mock
+    private jakarta.persistence.EntityManager entityManager;
 
     @InjectMocks
     private OrdenIngresoService ordenIngresoService;
@@ -90,6 +98,34 @@ class OrdenIngresoServiceTest {
                 .modelo(2021)
                 .propietario(propietarioMock)
                 .build();
+
+        lenient().when(clienteService.toDto(any(ClienteEntity.class))).thenAnswer(inv -> {
+            ClienteEntity c = inv.getArgument(0);
+            return ClienteResponseDto.builder()
+                    .id(c.getId())
+                    .numeroDocumento(c.getNumeroDocumento())
+                    .nombresRazonSocial(c.getNombresRazonSocial())
+                    .celular(c.getCelular())
+                    .build();
+        });
+
+        lenient().when(vehiculoService.toDto(any(VehiculoEntity.class))).thenAnswer(inv -> {
+            VehiculoEntity v = inv.getArgument(0);
+            return VehiculoResponseDto.builder()
+                    .id(v.getId())
+                    .placa(v.getPlaca())
+                    .categoria(v.getCategoria())
+                    .marca(v.getMarca())
+                    .linea(v.getLinea())
+                    .modelo(v.getModelo())
+                    .propietario(ClienteResponseDto.builder()
+                            .id(v.getPropietario().getId())
+                            .numeroDocumento(v.getPropietario().getNumeroDocumento())
+                            .nombresRazonSocial(v.getPropietario().getNombresRazonSocial())
+                            .celular(v.getPropietario().getCelular())
+                            .build())
+                    .build();
+        });
     }
 
     @Test
@@ -114,11 +150,12 @@ class OrdenIngresoServiceTest {
                 .conductor(propietarioMock)
                 .vehiculo(vehiculoMock)
                 .usuario(usuarioMock)
+                .esReinspeccion(false)
                 .build();
 
         when(usuarioRepository.findById(usuarioMock.getId())).thenReturn(Optional.of(usuarioMock));
         when(vehiculoRepository.findByPlaca("ABC123")).thenReturn(Optional.of(vehiculoMock));
-        when(ordenIngresoRepository.save(any(OrdenIngresoEntity.class))).thenReturn(ordenGuardada);
+        when(ordenIngresoRepository.saveAndFlush(any(OrdenIngresoEntity.class))).thenReturn(ordenGuardada);
         lenient().when(clienteService.toDto(any(ClienteEntity.class))).thenAnswer(inv -> {
             ClienteEntity c = inv.getArgument(0);
             return ClienteResponseDto.builder()
@@ -135,7 +172,7 @@ class OrdenIngresoServiceTest {
         assertEquals(1001L, response.getConsecutivo());
         assertTrue(response.getConductorEsPropietario());
         assertEquals("ABC123", response.getVehiculo().getPlaca());
-        verify(ordenIngresoRepository, times(1)).save(any(OrdenIngresoEntity.class));
+        verify(ordenIngresoRepository, times(1)).saveAndFlush(any(OrdenIngresoEntity.class));
     }
 
     @Test
@@ -161,12 +198,13 @@ class OrdenIngresoServiceTest {
                 .conductor(conductorTerceroMock)
                 .vehiculo(vehiculoMock)
                 .usuario(usuarioMock)
+                .esReinspeccion(false)
                 .build();
 
         when(usuarioRepository.findById(usuarioMock.getId())).thenReturn(Optional.of(usuarioMock));
         when(vehiculoRepository.findByPlaca("ABC123")).thenReturn(Optional.of(vehiculoMock));
         when(clienteRepository.findById(conductorTerceroMock.getId())).thenReturn(Optional.of(conductorTerceroMock));
-        when(ordenIngresoRepository.save(any(OrdenIngresoEntity.class))).thenReturn(ordenGuardada);
+        when(ordenIngresoRepository.saveAndFlush(any(OrdenIngresoEntity.class))).thenReturn(ordenGuardada);
         lenient().when(clienteService.toDto(any(ClienteEntity.class))).thenAnswer(inv -> {
             ClienteEntity c = inv.getArgument(0);
             return ClienteResponseDto.builder()

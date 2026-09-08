@@ -47,10 +47,24 @@ public class ClienteService {
         return toDto(entity);
     }
 
-    @Transactional(readOnly = true)
+    private final com.cdasanpedro.application.usecase.siigo.SiigoCustomerService siigoCustomerService;
+
+    @Transactional
     public Optional<ClienteResponseDto> buscarPorDocumento(String numeroDocumento) {
-        return clienteRepository.findByNumeroDocumento(numeroDocumento.trim())
-                .map(this::toDto);
+        String cleanDoc = numeroDocumento.trim();
+        Optional<ClienteEntity> local = clienteRepository.findByNumeroDocumento(cleanDoc);
+        if (local.isPresent()) {
+            return local.map(this::toDto);
+        }
+
+        // Búsqueda Just-in-Time en SIIGO Cloud API
+        if (siigoCustomerService != null) {
+            try {
+                return siigoCustomerService.buscarYAutoguardarDesdeSiigo(cleanDoc).map(this::toDto);
+            } catch (Exception ignored) {}
+        }
+
+        return Optional.empty();
     }
 
     @Transactional(readOnly = true)

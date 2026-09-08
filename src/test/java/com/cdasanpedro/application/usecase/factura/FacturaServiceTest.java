@@ -47,6 +47,8 @@ class FacturaServiceTest {
     private PdfGeneratorService pdfGeneratorService;
     @Mock
     private com.cdasanpedro.application.usecase.notificacion.NotificacionService notificacionService;
+    @Mock
+    private com.cdasanpedro.application.usecase.tarifa.TarifaService tarifaService;
 
     @InjectMocks
     private FacturaService facturaService;
@@ -123,6 +125,7 @@ class FacturaServiceTest {
         when(facturaRepository.findByOrdenIngresoId(ordenMock.getId())).thenReturn(Optional.empty());
         when(usuarioRepository.findById(cajeroMock.getId())).thenReturn(Optional.of(cajeroMock));
         when(facturaRepository.count()).thenReturn(0L);
+        when(tarifaService.obtenerPrecioPorCategoria(any())).thenReturn(new BigDecimal("320000.00"));
         when(facturaRepository.save(any(FacturaEntity.class))).thenReturn(facturaGuardada);
 
         when(clienteService.toDto(propietarioMock)).thenReturn(
@@ -143,5 +146,54 @@ class FacturaServiceTest {
         assertEquals(MetodoPago.EFECTIVO, response.getMetodoPago());
         assertEquals(EstadoOrden.FACTURADO, ordenMock.getEstado());
         verify(facturaRepository, times(1)).save(any(FacturaEntity.class));
+    }
+
+    @Test
+    @DisplayName("Debe emitir factura a $0 para reinspección gratuita de 15 días")
+    void emitirFactura_ReinspeccionGratuita_TotalCero() {
+        ordenMock.setEsReinspeccion(true);
+        ordenMock.setTipoServicio("REINSPECCION_GRATUITA");
+
+        FacturaRequestDto request = FacturaRequestDto.builder()
+                .ordenIngresoId(ordenMock.getId())
+                .pagadorTipo("PROPIETARIO")
+                .metodoPago(MetodoPago.EFECTIVO)
+                .build();
+
+        FacturaEntity facturaGuardada = FacturaEntity.builder()
+                .id(UUID.randomUUID())
+                .numeroFactura("FAC-00002")
+                .fechaEmision(OffsetDateTime.now())
+                .subtotal(BigDecimal.ZERO.setScale(2))
+                .iva(BigDecimal.ZERO.setScale(2))
+                .total(BigDecimal.ZERO.setScale(2))
+                .metodoPago(MetodoPago.EFECTIVO)
+                .estado(EstadoFactura.PAGADA)
+                .ordenIngreso(ordenMock)
+                .clienteFactura(propietarioMock)
+                .usuario(cajeroMock)
+                .build();
+
+        when(ordenIngresoRepository.findById(ordenMock.getId())).thenReturn(Optional.of(ordenMock));
+        when(facturaRepository.findByOrdenIngresoId(ordenMock.getId())).thenReturn(Optional.empty());
+        when(usuarioRepository.findById(cajeroMock.getId())).thenReturn(Optional.of(cajeroMock));
+        when(facturaRepository.count()).thenReturn(1L);
+        when(facturaRepository.save(any(FacturaEntity.class))).thenReturn(facturaGuardada);
+
+        when(clienteService.toDto(propietarioMock)).thenReturn(
+                ClienteResponseDto.builder().numeroDocumento("1020304050").nombresRazonSocial("Mauricio Propietario").build()
+        );
+        when(ordenIngresoService.toDto(ordenMock)).thenReturn(
+                OrdenIngresoResponseDto.builder()
+                        .consecutivo(1L)
+                        .vehiculo(VehiculoResponseDto.builder().placa("ABC123").categoria(CategoriaVehiculo.LIVIANO).build())
+                        .build()
+        );
+
+        FacturaResponseDto response = facturaService.emitirFactura(request, cajeroMock.getId());
+
+        assertNotNull(response);
+        assertEquals(BigDecimal.ZERO.setScale(2), response.getTotal());
+        assertEquals(EstadoOrden.FACTURADO, ordenMock.getEstado());
     }
 }

@@ -1,0 +1,13 @@
+package com.cdasanpedro.core.model.enums;
+
+public enum TipoObligacion {
+    FACTURA_PROVEEDOR,
+    MEMBRESIA_LICENCIA,
+    SOFTWARE_LICENCIAS,
+    SERVICIO_PUBLICO,
+    CALIBRACION_EQUIPOS,
+    SEGUROS_POLIZAS,
+    ARRIENDO,
+    IMPUESTOS_TASAS,
+    OTRO
+}

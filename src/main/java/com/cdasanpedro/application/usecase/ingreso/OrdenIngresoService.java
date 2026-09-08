@@ -36,6 +36,7 @@ public class OrdenIngresoService {
     private final PruebaInspeccionRepository pruebaInspeccionRepository;
     private final ClienteService clienteService;
     private final VehiculoService vehiculoService;
+    private final com.cdasanpedro.application.usecase.reinspeccion.ReinspeccionService reinspeccionService;
 
     @PersistenceContext
     private final EntityManager entityManager;
@@ -97,6 +98,11 @@ public class OrdenIngresoService {
         }
 
         // 4. Crear la Orden de Ingreso
+        OrdenIngresoEntity ordenPadre = null;
+        if (request.getOrdenPadreId() != null) {
+            ordenPadre = ordenIngresoRepository.findById(request.getOrdenPadreId()).orElse(null);
+        }
+
         OrdenIngresoEntity orden = OrdenIngresoEntity.builder()
                 .fechaIngreso(OffsetDateTime.now())
                 .kilometraje(request.getKilometraje())
@@ -106,11 +112,17 @@ public class OrdenIngresoService {
                 .conductor(conductor)
                 .vehiculo(vehiculo)
                 .usuario(usuario)
+                .ordenPadre(ordenPadre)
+                .esReinspeccion(Boolean.TRUE.equals(request.getEsReinspeccion()) || ordenPadre != null)
                 .observaciones(request.getObservaciones())
                 .build();
 
         OrdenIngresoEntity guardada = ordenIngresoRepository.saveAndFlush(orden);
         entityManager.refresh(guardada);
+
+        if (guardada.getEsReinspeccion() && request.getOrdenPadreId() != null) {
+            reinspeccionService.registrarReingreso(guardada.getId(), request.getOrdenPadreId());
+        }
 
         // 5. Inicializar las 4 Pruebas Técnicas Reglamentarias en estado PENDIENTE
         for (TipoPrueba tipo : TipoPrueba.values()) {
@@ -160,6 +172,7 @@ public class OrdenIngresoService {
         if (hayRechazo) {
             orden.setEstado(EstadoOrden.RECHAZADO);
             ordenIngresoRepository.save(orden);
+            reinspeccionService.registrarRechazo(orden.getId(), "Rechazado en inspección de pista");
         } else if (todasAprobadas) {
             orden.setEstado(EstadoOrden.APROBADO);
             ordenIngresoRepository.save(orden);
@@ -248,6 +261,11 @@ public class OrdenIngresoService {
             entity.setObservaciones(obsActual + observaciones.trim());
         }
         OrdenIngresoEntity actualizada = ordenIngresoRepository.save(entity);
+
+        if (nuevoEstado == EstadoOrden.RECHAZADO) {
+            reinspeccionService.registrarRechazo(actualizada.getId(), observaciones != null ? observaciones : "Rechazado");
+        }
+
         return toDto(actualizada);
     }
 
@@ -265,6 +283,9 @@ public class OrdenIngresoService {
                 .tipoServicio(entity.getTipoServicio())
                 .estado(entity.getEstado())
                 .conductorEsPropietario(entity.getConductorEsPropietario())
+                .ordenPadreId(entity.getOrdenPadre() != null ? entity.getOrdenPadre().getId() : null)
+                .esReinspeccion(entity.getEsReinspeccion())
+                .diasTranscurridosRechazo(entity.getDiasTranscurridosRechazo())
                 .vehiculo(vehDto)
                 .conductor(condDto)
                 .usuarioNombre(entity.getUsuario() != null ? entity.getUsuario().getNombresApellidos() : "Sistema")

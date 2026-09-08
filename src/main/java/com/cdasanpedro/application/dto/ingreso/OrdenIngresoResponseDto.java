@@ -24,6 +24,9 @@ public class OrdenIngresoResponseDto {
     private String tipoServicio;
     private EstadoOrden estado;
     private Boolean conductorEsPropietario;
+    private UUID ordenPadreId;
+    private Boolean esReinspeccion;
+    private Integer diasTranscurridosRechazo;
     private VehiculoResponseDto vehiculo;
     private ClienteResponseDto conductor;
     private String usuarioNombre;
