@@ -36,6 +36,9 @@ class ReinspeccionServiceTest {
     @Mock
     private NotificacionRepository notificacionRepository;
 
+    @Mock
+    private com.cdasanpedro.infrastructure.persistence.repository.PruebaInspeccionRepository pruebaInspeccionRepository;
+
     @InjectMocks
     private ReinspeccionService service;
 
@@ -77,6 +80,8 @@ class ReinspeccionServiceTest {
                 .estadoSeguimiento(EstadoReinspeccion.EN_PLAZO)
                 .reinspeccionCompletada(false)
                 .build();
+
+        lenient().when(pruebaInspeccionRepository.findByOrdenIngresoIdOrderByCreatedAtAsc(any())).thenReturn(Collections.emptyList());
     }
 
     @Test

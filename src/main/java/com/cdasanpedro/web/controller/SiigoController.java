@@ -49,7 +49,13 @@ public class SiigoController {
     public ResponseEntity<ApiResponse<FacturaElectronicaResponseDto>> emitirFacturaDian(@PathVariable UUID facturaId) {
         FacturaElectronicaResponseDto response = invoiceService.emitirFacturaDian(facturaId);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.ok(response, "Factura electrónica procesada ante la DIAN vía SIIGO"));
+                .body(ApiResponse.ok(response, "Factura electrónica transmitida y enviada a la DIAN vía SIIGO"));
+    }
+
+    @PostMapping("/facturas/{facturaId}/sincronizar-dian")
+    public ResponseEntity<ApiResponse<FacturaElectronicaResponseDto>> sincronizarEstadoDian(@PathVariable UUID facturaId) {
+        FacturaElectronicaResponseDto response = invoiceService.sincronizarEstadoDian(facturaId);
+        return ResponseEntity.ok(ApiResponse.ok(response, "Estado fiscal sincronizado con la DIAN y SIIGO"));
     }
 
     @GetMapping("/facturas/{facturaId}")

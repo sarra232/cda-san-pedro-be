@@ -35,6 +35,14 @@ app:
   mail:
     from-name: ${MAIL_FROM_NAME:CDA San Pedro}
     from-address: ${MAIL_FROM_ADDRESS:${MAIL_USERNAME:notificaciones@cdasanpedro.com}}
+  sms:
+    android-gateway-url: ${ANDROID_SMS_GATEWAY_URL:}
+    android-gateway-token: ${ANDROID_SMS_GATEWAY_TOKEN:}
+  notificaciones:
+    tesoreria:
+      cron: ${NOTIFICACIONES_TESORERIA_CRON:0 0 8 * * ?}
+      emails: ${NOTIFICACIONES_TESORERIA_EMAILS:administracion@cdasanpedro.com,gerencia@cdasanpedro.com}
+      telefonos: ${NOTIFICACIONES_TESORERIA_TELEFONOS:3000000000}
 
 # Integración Facturación Electrónica DIAN / SIIGO Cloud API
 siigo:

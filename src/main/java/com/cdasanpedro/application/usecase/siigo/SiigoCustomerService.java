@@ -45,7 +45,9 @@ public class SiigoCustomerService {
             }
         }
 
-        String nombreCompleto = cliente.getNombresRazonSocial() != null ? cliente.getNombresRazonSocial().trim() : "CLIENTE GENERAL";
+        String nombreCompleto = cliente.getNombresRazonSocial() != null && !cliente.getNombresRazonSocial().trim().isBlank()
+                ? cliente.getNombresRazonSocial().trim() 
+                : "CLIENTE GENERAL";
         List<String> names;
         if (esEmpresa) {
             names = List.of(nombreCompleto);
@@ -54,7 +56,7 @@ public class SiigoCustomerService {
             if (parts.length > 1 && !parts[1].trim().isBlank()) {
                 names = List.of(parts[0].trim(), parts[1].trim());
             } else {
-                names = List.of(nombreCompleto.trim(), ".");
+                names = List.of(nombreCompleto.trim(), "Cliente");
             }
         }
 
@@ -63,37 +65,42 @@ public class SiigoCustomerService {
                 : List.of(SiigoCustomerRequestDto.FiscalResponsibilityDto.builder().code("R-99-PN").build());
 
         // Sanitización estricta de teléfono: solo dígitos numéricos (máximo 10 caracteres)
-        List<SiigoCustomerRequestDto.CustomerPhoneDto> phonesList = Collections.emptyList();
-        if (cliente.getCelular() != null && !cliente.getCelular().isBlank()) {
-            String cleanPhone = cliente.getCelular().replaceAll("[^0-9]", "").trim();
-            if (!cleanPhone.isEmpty()) {
-                String indic = "57";
-                String num = cleanPhone;
-                if (cleanPhone.startsWith("57") && cleanPhone.length() > 10) {
-                    num = cleanPhone.substring(2);
-                }
-                if (num.length() > 10) {
-                    num = num.substring(num.length() - 10);
-                }
-                if (num.length() >= 7) {
-                    phonesList = List.of(SiigoCustomerRequestDto.CustomerPhoneDto.builder()
-                            .indicative(indic)
-                            .number(num)
-                            .build());
-                }
-            }
+        List<SiigoCustomerRequestDto.CustomerPhoneDto> phonesList;
+        String rawPhone = (cliente.getCelular() != null && !cliente.getCelular().isBlank())
+                ? cliente.getCelular()
+                : "3000000000";
+        String cleanPhone = rawPhone.replaceAll("[^0-9]", "").trim();
+        if (cleanPhone.startsWith("57") && cleanPhone.length() > 10) {
+            cleanPhone = cleanPhone.substring(2);
         }
+        if (cleanPhone.length() > 10) {
+            cleanPhone = cleanPhone.substring(cleanPhone.length() - 10);
+        }
+        if (cleanPhone.length() < 7) {
+            cleanPhone = "3000000000";
+        }
+        phonesList = List.of(SiigoCustomerRequestDto.CustomerPhoneDto.builder()
+                .indicative("57")
+                .number(cleanPhone)
+                .build());
 
-        // Sanitización de contactos
-        List<SiigoCustomerRequestDto.CustomerContactDto> contactsList = Collections.emptyList();
-        if (cliente.getEmail() != null && !cliente.getEmail().isBlank() && cliente.getEmail().contains("@")) {
-            contactsList = List.of(SiigoCustomerRequestDto.CustomerContactDto.builder()
-                    .firstName(names.get(0))
-                    .lastName(names.size() > 1 ? names.get(1) : ".")
-                    .email(cliente.getEmail().trim().toLowerCase())
-                    .phone(!phonesList.isEmpty() ? phonesList.get(0) : null)
-                    .build());
-        }
+        // Sanitización de contactos y correo electrónico DIAN
+        String emailFinal = (cliente.getEmail() != null && !cliente.getEmail().isBlank() && cliente.getEmail().contains("@"))
+                ? cliente.getEmail().trim().toLowerCase()
+                : "facturacion@cdasanpedro.com";
+
+        List<SiigoCustomerRequestDto.CustomerContactDto> contactsList = List.of(
+                SiigoCustomerRequestDto.CustomerContactDto.builder()
+                        .firstName(names.get(0))
+                        .lastName(names.size() > 1 ? names.get(1) : "Cliente")
+                        .email(emailFinal)
+                        .phone(phonesList.get(0))
+                        .build()
+        );
+
+        String direccionFinal = (cliente.getDireccion() != null && !cliente.getDireccion().isBlank())
+                ? cliente.getDireccion().trim()
+                : "Cra 50 # 48-20";
 
         SiigoCustomerRequestDto.SiigoCustomerRequestDtoBuilder builder = SiigoCustomerRequestDto.builder()
                 .type("Customer")
@@ -107,18 +114,16 @@ public class SiigoCustomerService {
                 .vatResponsible(esEmpresa)
                 .fiscalResponsibilities(fiscalList)
                 .phones(phonesList)
-                .contacts(contactsList);
-
-        if (cliente.getDireccion() != null && !cliente.getDireccion().isBlank()) {
-            builder.address(SiigoCustomerRequestDto.CustomerAddressDto.builder()
-                    .address(cliente.getDireccion().trim())
-                    .city(SiigoCustomerRequestDto.CityDto.builder()
-                            .countryCode("Co")
-                            .stateCode("05")
-                            .cityCode("05664")
-                            .build())
-                    .build());
-        }
+                .contacts(contactsList)
+                .address(SiigoCustomerRequestDto.CustomerAddressDto.builder()
+                        .address(direccionFinal)
+                        .city(SiigoCustomerRequestDto.CityDto.builder()
+                                .countryCode("Co")
+                                .stateCode("05")
+                                .cityCode("05664")
+                                .build())
+                        .postalCode("051050")
+                        .build());
 
         SiigoCustomerRequestDto request = builder.build();
 

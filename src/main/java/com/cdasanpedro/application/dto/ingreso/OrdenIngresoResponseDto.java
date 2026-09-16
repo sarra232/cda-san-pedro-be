@@ -32,9 +32,15 @@ public class OrdenIngresoResponseDto {
     private Boolean esReinspeccionVigente;
     private OffsetDateTime fechaLimiteReinspeccion;
     private java.util.List<String> pruebasRechazadasPrevias;
+    private String motivoRechazo;
+    private String evidenciaRechazo;
+    private java.util.List<String> pruebasRechazadas;
     private VehiculoResponseDto vehiculo;
     private ClienteResponseDto conductor;
     private String usuarioNombre;
     private String observaciones;
+    private Boolean facturado;
+    private UUID facturaId;
+    private String numeroFactura;
     private OffsetDateTime createdAt;
 }

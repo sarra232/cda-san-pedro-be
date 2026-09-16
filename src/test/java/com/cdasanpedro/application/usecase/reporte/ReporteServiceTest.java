@@ -108,7 +108,7 @@ class ReporteServiceTest {
         assertEquals(1L, stats.getFacturasEmitidasHoy());
         assertEquals(1L, stats.getTotalLivianos());
         assertEquals(0L, stats.getTotalMotos());
-        assertEquals(6, stats.getActividadPorHoras().size());
+        assertEquals(10, stats.getActividadPorHoras().size());
     }
 
     @Test

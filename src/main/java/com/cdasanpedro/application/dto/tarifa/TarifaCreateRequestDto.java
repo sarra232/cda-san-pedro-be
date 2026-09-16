@@ -29,8 +29,14 @@ public class TarifaCreateRequestDto {
 
     private String descripcion;
 
-    @NotNull(message = "El precio oficial es obligatorio")
-    @DecimalMin(value = "0.0", inclusive = true, message = "El precio no puede ser negativo")
+    private BigDecimal valorServicio;
+    private BigDecimal iva;
+    private BigDecimal runt;
+    private BigDecimal sicov;
+    private BigDecimal operador;
+    private BigDecimal seguridadVial;
+    private BigDecimal fupa;
+
     private BigDecimal precio;
 
     @DecimalMin(value = "0.0", inclusive = true, message = "El porcentaje de IVA no puede ser negativo")

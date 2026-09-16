@@ -28,6 +28,14 @@ public class SiigoInvoiceRequestDto {
     @JsonProperty("cost_center")
     private Integer costCenter;
 
+    @JsonProperty("stamp")
+    @Builder.Default
+    private StampRequestDto stamp = new StampRequestDto(true);
+
+    @JsonProperty("mail")
+    @Builder.Default
+    private MailRequestDto mail = new MailRequestDto(true);
+
     @JsonProperty("items")
     private List<InvoiceItemDto> items;
 
@@ -36,6 +44,28 @@ public class SiigoInvoiceRequestDto {
 
     @JsonProperty("observations")
     private String observations;
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class StampRequestDto {
+        @JsonProperty("send")
+        @Builder.Default
+        private Boolean send = true;
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class MailRequestDto {
+        @JsonProperty("send")
+        @Builder.Default
+        private Boolean send = true;
+    }
 
     @Getter
     @Setter

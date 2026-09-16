@@ -41,6 +41,32 @@ public class CuentaPorPagarController {
         return ResponseEntity.ok(ApiResponse.ok(cuentaPorPagarService.crear(request), "Cuenta por pagar registrada exitosamente"));
     }
 
+    @PutMapping("/{id}")
+    public ResponseEntity<ApiResponse<CuentaPorPagarResponseDto>> actualizar(
+            @PathVariable UUID id,
+            @Valid @RequestBody CuentaPorPagarRequestDto request
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(cuentaPorPagarService.actualizar(id, request), "Cuenta por pagar actualizada exitosamente"));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<ApiResponse<Void>> eliminar(@PathVariable UUID id) {
+        cuentaPorPagarService.eliminar(id);
+        return ResponseEntity.ok(ApiResponse.ok(null, "Cuenta por pagar anulada exitosamente"));
+    }
+
+    @GetMapping("/configuracion-alertas")
+    public ResponseEntity<ApiResponse<ConfiguracionAlertasTesoreriaDto>> obtenerConfiguracionAlertas() {
+        return ResponseEntity.ok(ApiResponse.ok(cuentaPorPagarService.obtenerConfiguracionAlertas(), "Configuración de alertas recuperada"));
+    }
+
+    @PutMapping("/configuracion-alertas")
+    public ResponseEntity<ApiResponse<ConfiguracionAlertasTesoreriaDto>> guardarConfiguracionAlertas(
+            @RequestBody ConfiguracionAlertasTesoreriaDto dto
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(cuentaPorPagarService.guardarConfiguracionAlertas(dto), "Configuración de destinatarios y alertas actualizada"));
+    }
+
     @PostMapping("/{id}/pagos")
     public ResponseEntity<ApiResponse<CuentaPorPagarResponseDto>> registrarPago(
             @PathVariable UUID id,
@@ -53,5 +79,11 @@ public class CuentaPorPagarController {
         }
         CuentaPorPagarResponseDto response = cuentaPorPagarService.registrarPago(id, request, usuarioId);
         return ResponseEntity.ok(ApiResponse.ok(response, "Pago registrado exitosamente"));
+    }
+
+    @PostMapping("/notificar-pendientes")
+    public ResponseEntity<ApiResponse<String>> notificarPendientes(@RequestBody(required = false) NotificarCuentasRequestDto request) {
+        cuentaPorPagarService.notificarPendientes(request);
+        return ResponseEntity.ok(ApiResponse.ok("Alertas despachadas exitosamente a los administradores por Email y SMS/WhatsApp.", "Notificación enviada"));
     }
 }

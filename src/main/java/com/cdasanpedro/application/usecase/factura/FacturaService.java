@@ -237,11 +237,13 @@ public class FacturaService {
         return toDto(factura);
     }
 
+    private static final java.time.ZoneId ZONE_COLOMBIA = java.time.ZoneId.of("America/Bogota");
+
     @Transactional(readOnly = true)
     public List<FacturaResponseDto> listarFacturas(LocalDate fechaInicio, LocalDate fechaFin) {
         if (fechaInicio != null && fechaFin != null) {
-            OffsetDateTime start = fechaInicio.atStartOfDay().atOffset(ZoneOffset.UTC);
-            OffsetDateTime end = fechaFin.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC);
+            OffsetDateTime start = fechaInicio.atStartOfDay(ZONE_COLOMBIA).toOffsetDateTime();
+            OffsetDateTime end = fechaFin.plusDays(1).atStartOfDay(ZONE_COLOMBIA).toOffsetDateTime();
             return facturaRepository.findByFechaEmisionBetween(start, end)
                     .stream()
                     .map(this::toDto)

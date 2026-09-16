@@ -9,5 +9,6 @@ public enum TipoObligacion {
     SEGUROS_POLIZAS,
     ARRIENDO,
     IMPUESTOS_TASAS,
+    OBLIGACION_LABORAL,
     OTRO
 }

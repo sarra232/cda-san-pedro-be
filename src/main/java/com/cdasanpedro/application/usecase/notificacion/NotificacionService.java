@@ -3,6 +3,7 @@ package com.cdasanpedro.application.usecase.notificacion;
 import com.cdasanpedro.application.dto.notificacion.NotificacionResponseDto;
 import com.cdasanpedro.core.exception.ResourceNotFoundException;
 import com.cdasanpedro.core.gateway.NotificationGateway;
+import com.cdasanpedro.infrastructure.notification.EmailTemplateBuilder;
 import com.cdasanpedro.infrastructure.pdf.PdfGeneratorService;
 import com.cdasanpedro.infrastructure.persistence.entity.ClienteEntity;
 import com.cdasanpedro.infrastructure.persistence.entity.FacturaEntity;
@@ -296,6 +297,67 @@ public class NotificacionService {
                 .stream()
                 .map(this::toDto)
                 .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public void notificarCuentasPorPagarPendientes(
+            List<String> emailsDestino,
+            List<String> telefonosDestino,
+            com.cdasanpedro.application.dto.cuentapagar.SemaforoVencimientosDto semaforo
+    ) {
+        log.info(">> [NotificacionService] Despachando alerta ejecutiva de cuentas pendientes...");
+        if (semaforo == null) return;
+
+        // 1. Construir plantilla HTML
+        String htmlBody = EmailTemplateBuilder.buildResumenCuentasPendientes(
+                semaforo.getTotalVencidas(),
+                semaforo.getSaldoVencido(),
+                semaforo.getTotalProximas(),
+                semaforo.getSaldoProximo(),
+                semaforo.getCuentasUrgentes()
+        );
+
+        String subject = "🚨 Alerta Tesorería: " + (semaforo.getTotalVencidas() + semaforo.getTotalProximas()) + " Facturas Pendientes por Pagar - CDA San Pedro";
+
+        // 2. Enviar a correos electrónicos
+        if (emailsDestino != null && !emailsDestino.isEmpty()) {
+            for (String email : emailsDestino) {
+                if (email != null && !email.isBlank()) {
+                    try {
+                        notificationGateway.sendEmail(email.trim(), subject, htmlBody, null, null);
+                        log.info(">> [NotificacionService] Correo de facturas pendientes enviado a {}", email);
+                    } catch (Exception ex) {
+                        log.error(">> Error al enviar correo de cuentas por pagar a {}: {}", email, ex.getMessage());
+                    }
+                }
+            }
+        }
+
+        // 3. Enviar SMS / WhatsApp a teléfonos
+        if (telefonosDestino != null && !telefonosDestino.isEmpty()) {
+            BigDecimal totalUrgente = (semaforo.getSaldoVencido() != null ? semaforo.getSaldoVencido() : BigDecimal.ZERO)
+                    .add(semaforo.getSaldoProximo() != null ? semaforo.getSaldoProximo() : BigDecimal.ZERO);
+
+            String mensajeSms = String.format(
+                    "🚨 [CDA San Pedro] Alerta Tesorería: Hay %d facturas vencidas ($%s) y %d próximas a vencer ($%s). Total urgente: $%s. Revisa el módulo de Cuentas por Pagar.",
+                    semaforo.getTotalVencidas(),
+                    semaforo.getSaldoVencido() != null ? semaforo.getSaldoVencido().toPlainString() : "0",
+                    semaforo.getTotalProximas(),
+                    semaforo.getSaldoProximo() != null ? semaforo.getSaldoProximo().toPlainString() : "0",
+                    totalUrgente.toPlainString()
+            );
+
+            for (String tel : telefonosDestino) {
+                if (tel != null && !tel.isBlank()) {
+                    try {
+                        notificationGateway.sendWhatsAppMessage(tel.trim(), mensajeSms, new HashMap<>());
+                        log.info(">> [NotificacionService] Alerta de texto despachada al celular {}", tel);
+                    } catch (Exception ex) {
+                        log.error(">> Error al despachar mensaje de texto a {}: {}", tel, ex.getMessage());
+                    }
+                }
+            }
+        }
     }
 
     public NotificacionResponseDto toDto(NotificacionEntity entity) {

@@ -53,6 +53,8 @@ class OrdenIngresoServiceTest {
     @Mock
     private PruebaInspeccionRepository pruebaInspeccionRepository;
     @Mock
+    private com.cdasanpedro.infrastructure.persistence.repository.FacturaRepository facturaRepository;
+    @Mock
     private com.cdasanpedro.application.usecase.reinspeccion.ReinspeccionService reinspeccionService;
     @Mock
     private jakarta.persistence.EntityManager entityManager;
@@ -126,6 +128,7 @@ class OrdenIngresoServiceTest {
                             .build())
                     .build();
         });
+        lenient().when(facturaRepository.findByOrdenIngresoId(any())).thenReturn(Optional.empty());
     }
 
     @Test

@@ -40,6 +40,34 @@ public class TarifaEntity {
     @Column(name = "descripcion", length = 255)
     private String descripcion;
 
+    @Column(name = "valor_servicio", precision = 14, scale = 2)
+    @Builder.Default
+    private BigDecimal valorServicio = BigDecimal.ZERO;
+
+    @Column(name = "iva", precision = 14, scale = 2)
+    @Builder.Default
+    private BigDecimal iva = BigDecimal.ZERO;
+
+    @Column(name = "runt", precision = 14, scale = 2)
+    @Builder.Default
+    private BigDecimal runt = BigDecimal.ZERO;
+
+    @Column(name = "sicov", precision = 14, scale = 2)
+    @Builder.Default
+    private BigDecimal sicov = BigDecimal.ZERO;
+
+    @Column(name = "operador", precision = 14, scale = 2)
+    @Builder.Default
+    private BigDecimal operador = BigDecimal.ZERO;
+
+    @Column(name = "seguridad_vial", precision = 14, scale = 2)
+    @Builder.Default
+    private BigDecimal seguridadVial = BigDecimal.ZERO;
+
+    @Column(name = "fupa", precision = 14, scale = 2)
+    @Builder.Default
+    private BigDecimal fupa = BigDecimal.ZERO;
+
     @Column(name = "precio", nullable = false, precision = 14, scale = 2)
     private BigDecimal precio;
 

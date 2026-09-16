@@ -49,7 +49,17 @@ public class SecurityConfig {
             )
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/auth/login").permitAll()
+                .requestMatchers(
+                    "/api/auth/login",
+                    "/api/auth/solicitar-recuperacion",
+                    "/api/auth/recuperar-password",
+                    "/api/auth/forgot-password",
+                    "/api/auth/validar-token",
+                    "/api/auth/validate-token",
+                    "/api/auth/establecer-password",
+                    "/api/auth/restablecer-password",
+                    "/api/auth/reset-password"
+                ).permitAll()
                 .requestMatchers("/api/public/**").permitAll()
                 .requestMatchers("/actuator/health").permitAll()
                 .anyRequest().authenticated()

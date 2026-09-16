@@ -22,6 +22,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -34,6 +35,7 @@ public class OrdenIngresoService {
     private final ClienteRepository clienteRepository;
     private final UsuarioRepository usuarioRepository;
     private final PruebaInspeccionRepository pruebaInspeccionRepository;
+    private final FacturaRepository facturaRepository;
     private final ClienteService clienteService;
     private final VehiculoService vehiculoService;
     private final com.cdasanpedro.application.usecase.reinspeccion.ReinspeccionService reinspeccionService;
@@ -216,15 +218,18 @@ public class OrdenIngresoService {
         return ordenIngresoRepository.findAll()
                 .stream()
                 .filter(o -> o.getEstado() != EstadoOrden.CANCELADO && o.getEstado() != EstadoOrden.FACTURADO)
+                .filter(o -> facturaRepository.findByOrdenIngresoId(o.getId()).isEmpty())
                 .map(this::toDto)
                 .collect(Collectors.toList());
     }
 
+    private static final java.time.ZoneId ZONE_COLOMBIA = java.time.ZoneId.of("America/Bogota");
+
     @Transactional(readOnly = true)
     public List<OrdenIngresoResponseDto> listarIngresosHoy() {
-        LocalDate hoy = LocalDate.now();
-        OffsetDateTime start = hoy.atStartOfDay().atOffset(ZoneOffset.UTC);
-        OffsetDateTime end = hoy.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC);
+        LocalDate hoy = LocalDate.now(ZONE_COLOMBIA);
+        OffsetDateTime start = hoy.atStartOfDay(ZONE_COLOMBIA).toOffsetDateTime();
+        OffsetDateTime end = hoy.plusDays(1).atStartOfDay(ZONE_COLOMBIA).toOffsetDateTime();
 
         return ordenIngresoRepository.findByFechaIngresoBetween(start, end)
                 .stream()
@@ -257,23 +262,66 @@ public class OrdenIngresoService {
         return cambiarEstado(id, nuevoEstado, observaciones, null);
     }
 
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+
+    @Transactional
+    public OrdenIngresoResponseDto rechazarOrden(UUID id, RechazoOrdenRequestDto request, UUID usuarioId) {
+        OrdenIngresoEntity entity = ordenIngresoRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Orden de ingreso no encontrada con ID: " + id));
+
+        UsuarioEntity usuario = usuarioId != null 
+                ? usuarioRepository.findById(usuarioId).orElse(entity.getUsuario())
+                : entity.getUsuario();
+
+        entity.setEstado(EstadoOrden.RECHAZADO);
+        entity.setObservaciones(request.getMotivo() != null ? request.getMotivo().trim() : "Rechazado en inspección");
+
+        // Construir metadata con motivo, evidencia y pruebas reprobadas
+        List<String> nombresPruebas = request.getPruebasRechazadas() != null
+                ? request.getPruebasRechazadas().stream().map(Enum::name).collect(Collectors.toList())
+                : java.util.Collections.emptyList();
+
+        java.util.Map<String, Object> metaMap = new java.util.HashMap<>();
+        metaMap.put("motivoRechazo", request.getMotivo());
+        metaMap.put("evidenciaRechazo", request.getEvidencia());
+        metaMap.put("pruebasRechazadas", nombresPruebas);
+        metaMap.put("fechaRechazo", OffsetDateTime.now().toString());
+        metaMap.put("usuarioRechazo", usuario != null ? usuario.getNombresApellidos() : "Sistema");
+
+        String jsonMeta = "{}";
+        try {
+            jsonMeta = objectMapper.writeValueAsString(metaMap);
+            entity.setMetadata(jsonMeta);
+        } catch (Exception ignored) {
+        }
+
+        OrdenIngresoEntity guardada = ordenIngresoRepository.save(entity);
+
+        // Actualizar estados individuales de pruebas
+        List<PruebaInspeccionEntity> pruebas = pruebaInspeccionRepository.findByOrdenIngresoIdOrderByCreatedAtAsc(id);
+        for (PruebaInspeccionEntity p : pruebas) {
+            if (request.getPruebasRechazadas() != null && request.getPruebasRechazadas().contains(p.getTipoPrueba())) {
+                p.setEstado(EstadoPrueba.RECHAZADO);
+                p.setObservaciones(request.getMotivo());
+            } else if (p.getEstado() == EstadoPrueba.PENDIENTE) {
+                p.setEstado(EstadoPrueba.APROBADO);
+            }
+            p.setUsuarioResponsable(usuario);
+            p.setFechaEjecucion(OffsetDateTime.now());
+            pruebaInspeccionRepository.save(p);
+        }
+
+        reinspeccionService.registrarRechazo(guardada.getId(), jsonMeta);
+
+        return toDto(guardada);
+    }
+
     @Transactional
     public OrdenIngresoResponseDto cambiarEstado(UUID id, EstadoOrden nuevoEstado, String observaciones, UUID usuarioId) {
         OrdenIngresoEntity entity = ordenIngresoRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Orden de ingreso no encontrada con ID: " + id));
 
-        if (usuarioId != null) {
-            UsuarioEntity usuario = usuarioRepository.findById(usuarioId)
-                    .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado con ID: " + usuarioId));
-
-            if ((nuevoEstado == EstadoOrden.APROBADO || nuevoEstado == EstadoOrden.RECHAZADO)
-                    && usuario.getRol() != com.cdasanpedro.core.model.enums.RolUsuario.ADMINISTRADOR 
-                    && usuario.getRol() != com.cdasanpedro.core.model.enums.RolUsuario.DIRECTOR_TECNICO) {
-                throw new BusinessException(
-                        "Solo el Director Técnico o el Administrador están autorizados para emitir el dictamen final de certificación RTM."
-                );
-            }
-        }
+        UsuarioEntity usuario = usuarioId != null ? usuarioRepository.findById(usuarioId).orElse(null) : null;
 
         entity.setEstado(nuevoEstado);
         if (observaciones != null && !observaciones.isBlank()) {
@@ -282,6 +330,20 @@ public class OrdenIngresoService {
                     : "";
             entity.setObservaciones(obsActual + observaciones.trim());
         }
+
+        // Si se aprueba, por defecto se aprueban todas las pruebas pendientes automáticamente
+        if (nuevoEstado == EstadoOrden.APROBADO) {
+            List<PruebaInspeccionEntity> pruebas = pruebaInspeccionRepository.findByOrdenIngresoIdOrderByCreatedAtAsc(id);
+            for (PruebaInspeccionEntity p : pruebas) {
+                if (p.getEstado() == EstadoPrueba.PENDIENTE) {
+                    p.setEstado(EstadoPrueba.APROBADO);
+                    p.setUsuarioResponsable(usuario != null ? usuario : entity.getUsuario());
+                    p.setFechaEjecucion(OffsetDateTime.now());
+                    pruebaInspeccionRepository.save(p);
+                }
+            }
+        }
+
         OrdenIngresoEntity actualizada = ordenIngresoRepository.save(entity);
 
         if (nuevoEstado == EstadoOrden.RECHAZADO) {
@@ -302,7 +364,11 @@ public class OrdenIngresoService {
         OffsetDateTime fechaLimite = null;
         Long consecutivoPadre = entity.getOrdenPadre() != null ? entity.getOrdenPadre().getConsecutivo() : null;
         List<String> pruebasFallidasPadre = null;
+        String motivoRechazo = null;
+        String evidenciaRechazo = null;
+        List<String> pruebasRechazadas = new java.util.ArrayList<>();
 
+        // Extraer motivo y evidencia de rechazo si aplica
         if (entity.getEstado() == EstadoOrden.RECHAZADO) {
             OffsetDateTime fechaBase = entity.getFechaIngreso() != null ? entity.getFechaIngreso() : entity.getCreatedAt();
             fechaLimite = fechaBase.plusDays(15);
@@ -310,6 +376,33 @@ public class OrdenIngresoService {
             long restantes = java.time.temporal.ChronoUnit.DAYS.between(OffsetDateTime.now(), fechaLimite);
             diasRestantes = Math.max(0, restantes);
             esVigente = restantes >= 0 && transcurridos <= 15;
+
+            // Pruebas fallidas de esta misma orden
+            pruebasRechazadas = pruebaInspeccionRepository.findByOrdenIngresoIdOrderByCreatedAtAsc(entity.getId())
+                    .stream()
+                    .filter(p -> p.getEstado() == EstadoPrueba.RECHAZADO)
+                    .map(p -> p.getTipoPrueba().name())
+                    .collect(Collectors.toList());
+
+            if (entity.getMetadata() != null && !entity.getMetadata().isBlank()) {
+                try {
+                    com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(entity.getMetadata());
+                    if (node.hasNonNull("motivoRechazo")) {
+                        motivoRechazo = node.get("motivoRechazo").asText();
+                    } else if (node.hasNonNull("motivo")) {
+                        motivoRechazo = node.get("motivo").asText();
+                    }
+                    if (node.hasNonNull("evidenciaRechazo")) {
+                        evidenciaRechazo = node.get("evidenciaRechazo").asText();
+                    } else if (node.hasNonNull("evidencia")) {
+                        evidenciaRechazo = node.get("evidencia").asText();
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+            if (motivoRechazo == null) {
+                motivoRechazo = entity.getObservaciones();
+            }
         }
 
         if (entity.getOrdenPadre() != null) {
@@ -319,6 +412,12 @@ public class OrdenIngresoService {
                     .map(p -> p.getTipoPrueba().name())
                     .collect(Collectors.toList());
         }
+
+        // Factura asociada
+        Optional<FacturaEntity> optFactura = facturaRepository.findByOrdenIngresoId(entity.getId());
+        boolean facturado = optFactura.isPresent() || entity.getEstado() == EstadoOrden.FACTURADO;
+        UUID facturaId = optFactura.map(FacturaEntity::getId).orElse(null);
+        String numeroFactura = optFactura.map(FacturaEntity::getNumeroFactura).orElse(null);
 
         return OrdenIngresoResponseDto.builder()
                 .id(entity.getId())
@@ -336,10 +435,16 @@ public class OrdenIngresoService {
                 .esReinspeccionVigente(esVigente)
                 .fechaLimiteReinspeccion(fechaLimite)
                 .pruebasRechazadasPrevias(pruebasFallidasPadre)
+                .motivoRechazo(motivoRechazo)
+                .evidenciaRechazo(evidenciaRechazo)
+                .pruebasRechazadas(pruebasRechazadas)
                 .vehiculo(vehDto)
                 .conductor(condDto)
                 .usuarioNombre(entity.getUsuario() != null ? entity.getUsuario().getNombresApellidos() : "Sistema")
                 .observaciones(entity.getObservaciones())
+                .facturado(facturado)
+                .facturaId(facturaId)
+                .numeroFactura(numeroFactura)
                 .createdAt(entity.getCreatedAt())
                 .build();
     }

@@ -81,6 +81,25 @@ public class TarifaService {
             codigo = "SRV-" + request.getCategoria() + "-" + System.currentTimeMillis() % 10000;
         }
 
+        BigDecimal valorServicio = request.getValorServicio() != null ? request.getValorServicio() : BigDecimal.ZERO;
+        BigDecimal iva = request.getIva() != null ? request.getIva() : BigDecimal.ZERO;
+        BigDecimal runt = request.getRunt() != null ? request.getRunt() : BigDecimal.ZERO;
+        BigDecimal sicov = request.getSicov() != null ? request.getSicov() : BigDecimal.ZERO;
+        BigDecimal operador = request.getOperador() != null ? request.getOperador() : BigDecimal.ZERO;
+        BigDecimal seguridadVial = request.getSeguridadVial() != null ? request.getSeguridadVial() : BigDecimal.ZERO;
+        BigDecimal fupa = request.getFupa() != null ? request.getFupa() : BigDecimal.ZERO;
+
+        BigDecimal sumaDesglose = valorServicio.add(iva).add(runt).add(sicov).add(operador).add(seguridadVial).add(fupa);
+        BigDecimal precioFinal = (sumaDesglose.compareTo(BigDecimal.ZERO) > 0) 
+                ? sumaDesglose 
+                : (request.getPrecio() != null ? request.getPrecio() : BigDecimal.ZERO);
+
+        // Si se envió solo el precio total sin desglose, calcular valor base e IVA
+        if (sumaDesglose.compareTo(BigDecimal.ZERO) == 0 && precioFinal.compareTo(BigDecimal.ZERO) > 0) {
+            valorServicio = precioFinal.divide(new BigDecimal("1.19"), 2, java.math.RoundingMode.HALF_UP);
+            iva = precioFinal.subtract(valorServicio);
+        }
+
         TarifaEntity entity = TarifaEntity.builder()
                 .codigo(codigo.trim().toUpperCase())
                 .categoria(request.getCategoria())
@@ -89,8 +108,15 @@ public class TarifaService {
                         : "RTM_LEGAL")
                 .nombreServicio(request.getNombreServicio().trim())
                 .descripcion(request.getDescripcion() != null ? request.getDescripcion().trim() : null)
-                .precio(request.getPrecio())
-                .ivaPorcentaje(request.getIvaPorcentaje() != null ? request.getIvaPorcentaje() : BigDecimal.ZERO)
+                .valorServicio(valorServicio)
+                .iva(iva)
+                .runt(runt)
+                .sicov(sicov)
+                .operador(operador)
+                .seguridadVial(seguridadVial)
+                .fupa(fupa)
+                .precio(precioFinal)
+                .ivaPorcentaje(request.getIvaPorcentaje() != null ? request.getIvaPorcentaje() : new BigDecimal("19.00"))
                 .activo(request.getActivo() != null ? request.getActivo() : true)
                 .build();
 
@@ -118,7 +144,34 @@ public class TarifaService {
         if (request.getDescripcion() != null) {
             entity.setDescripcion(request.getDescripcion().trim());
         }
-        entity.setPrecio(request.getPrecio());
+
+        BigDecimal valorServicio = request.getValorServicio() != null ? request.getValorServicio() : (entity.getValorServicio() != null ? entity.getValorServicio() : BigDecimal.ZERO);
+        BigDecimal iva = request.getIva() != null ? request.getIva() : (entity.getIva() != null ? entity.getIva() : BigDecimal.ZERO);
+        BigDecimal runt = request.getRunt() != null ? request.getRunt() : (entity.getRunt() != null ? entity.getRunt() : BigDecimal.ZERO);
+        BigDecimal sicov = request.getSicov() != null ? request.getSicov() : (entity.getSicov() != null ? entity.getSicov() : BigDecimal.ZERO);
+        BigDecimal operador = request.getOperador() != null ? request.getOperador() : (entity.getOperador() != null ? entity.getOperador() : BigDecimal.ZERO);
+        BigDecimal seguridadVial = request.getSeguridadVial() != null ? request.getSeguridadVial() : (entity.getSeguridadVial() != null ? entity.getSeguridadVial() : BigDecimal.ZERO);
+        BigDecimal fupa = request.getFupa() != null ? request.getFupa() : (entity.getFupa() != null ? entity.getFupa() : BigDecimal.ZERO);
+
+        BigDecimal sumaDesglose = valorServicio.add(iva).add(runt).add(sicov).add(operador).add(seguridadVial).add(fupa);
+        BigDecimal precioFinal = (sumaDesglose.compareTo(BigDecimal.ZERO) > 0)
+                ? sumaDesglose
+                : (request.getPrecio() != null ? request.getPrecio() : entity.getPrecio());
+
+        if (sumaDesglose.compareTo(BigDecimal.ZERO) == 0 && precioFinal.compareTo(BigDecimal.ZERO) > 0) {
+            valorServicio = precioFinal.divide(new BigDecimal("1.19"), 2, java.math.RoundingMode.HALF_UP);
+            iva = precioFinal.subtract(valorServicio);
+        }
+
+        entity.setValorServicio(valorServicio);
+        entity.setIva(iva);
+        entity.setRunt(runt);
+        entity.setSicov(sicov);
+        entity.setOperador(operador);
+        entity.setSeguridadVial(seguridadVial);
+        entity.setFupa(fupa);
+        entity.setPrecio(precioFinal);
+
         if (request.getIvaPorcentaje() != null) {
             entity.setIvaPorcentaje(request.getIvaPorcentaje());
         }
@@ -159,6 +212,13 @@ public class TarifaService {
                 .tipoServicio(entity.getTipoServicio())
                 .nombreServicio(entity.getNombreServicio())
                 .descripcion(entity.getDescripcion())
+                .valorServicio(entity.getValorServicio() != null ? entity.getValorServicio() : BigDecimal.ZERO)
+                .iva(entity.getIva() != null ? entity.getIva() : BigDecimal.ZERO)
+                .runt(entity.getRunt() != null ? entity.getRunt() : BigDecimal.ZERO)
+                .sicov(entity.getSicov() != null ? entity.getSicov() : BigDecimal.ZERO)
+                .operador(entity.getOperador() != null ? entity.getOperador() : BigDecimal.ZERO)
+                .seguridadVial(entity.getSeguridadVial() != null ? entity.getSeguridadVial() : BigDecimal.ZERO)
+                .fupa(entity.getFupa() != null ? entity.getFupa() : BigDecimal.ZERO)
                 .precio(entity.getPrecio())
                 .ivaPorcentaje(entity.getIvaPorcentaje())
                 .activo(entity.getActivo())

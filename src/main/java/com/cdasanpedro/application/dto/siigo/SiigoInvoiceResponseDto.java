@@ -1,5 +1,6 @@
 package com.cdasanpedro.application.dto.siigo;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.*;
 
@@ -11,6 +12,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class SiigoInvoiceResponseDto {
 
     @JsonProperty("id")
@@ -40,11 +42,15 @@ public class SiigoInvoiceResponseDto {
     @JsonProperty("stamp")
     private StampDto stamp;
 
+    @JsonProperty("errors")
+    private List<ErrorDetailDto> errors;
+
     @Getter
     @Setter
     @NoArgsConstructor
     @AllArgsConstructor
     @Builder
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class StampDto {
         @JsonProperty("status")
         private String status;
@@ -54,5 +60,25 @@ public class SiigoInvoiceResponseDto {
 
         @JsonProperty("qr")
         private String qr;
+
+        @JsonProperty("errors")
+        private List<ErrorDetailDto> errors;
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class ErrorDetailDto {
+        @JsonProperty("code")
+        private String code;
+
+        @JsonProperty("message")
+        private String message;
+
+        @JsonProperty("detail")
+        private String detail;
     }
 }

@@ -1,6 +1,7 @@
 package com.cdasanpedro.application.usecase.siigo;
 
 import com.cdasanpedro.application.dto.siigo.FacturaElectronicaResponseDto;
+import com.cdasanpedro.application.dto.siigo.SiigoInvoiceResponseDto;
 import com.cdasanpedro.core.model.enums.*;
 import com.cdasanpedro.infrastructure.persistence.entity.*;
 import com.cdasanpedro.infrastructure.persistence.repository.*;
@@ -121,5 +122,38 @@ class SiigoInvoiceServiceTest {
         assertTrue(response.getCufe().startsWith("cufe_sandbox_"));
         assertNotNull(response.getPdfSiigoUrl());
         verify(customerService, times(1)).sincronizarCliente(cliente);
+    }
+
+    @Test
+    void testSincronizarEstadoDian_FacturaExistente() {
+        FacturaElectronicaDianEntity dianEntity = FacturaElectronicaDianEntity.builder()
+                .id(UUID.randomUUID())
+                .factura(factura)
+                .siigoInvoiceId("siigo-doc-123")
+                .estadoDian(EstadoFacturaDian.PENDIENTE)
+                .build();
+
+        when(facturaRepository.findById(factura.getId())).thenReturn(Optional.of(factura));
+        when(dianRepository.findByFacturaId(factura.getId())).thenReturn(Optional.of(dianEntity));
+        when(properties.isConfigured()).thenReturn(true);
+        when(authService.getValidToken()).thenReturn("mock-token");
+
+        SiigoInvoiceResponseDto apiResponse = SiigoInvoiceResponseDto.builder()
+                .id("siigo-doc-123")
+                .cufe("cufe-dian-aprobado-999")
+                .qrCode("https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=cufe-dian-aprobado-999")
+                .publicUrl("https://api.siigo.com/v1/invoices/siigo-doc-123/pdf")
+                .stamp(SiigoInvoiceResponseDto.StampDto.builder().status("Approved").cufe("cufe-dian-aprobado-999").build())
+                .build();
+
+        when(apiClient.getInvoice("siigo-doc-123", "mock-token")).thenReturn(apiResponse);
+        when(dianRepository.save(any(FacturaElectronicaDianEntity.class))).thenAnswer(i -> i.getArgument(0));
+
+        FacturaElectronicaResponseDto res = invoiceService.sincronizarEstadoDian(factura.getId());
+
+        assertNotNull(res);
+        assertEquals(EstadoFacturaDian.EMITIDA, res.getEstadoDian());
+        assertEquals("cufe-dian-aprobado-999", res.getCufe());
+        assertTrue(res.getMensajeRespuesta().contains("Aprobada y validada por la DIAN"));
     }
 }

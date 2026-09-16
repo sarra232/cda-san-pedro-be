@@ -85,4 +85,15 @@ public class OrdenIngresoController {
         OrdenIngresoResponseDto actualizada = ordenIngresoService.cambiarEstado(id, estado, observaciones, usuarioId);
         return ResponseEntity.ok(ApiResponse.ok(actualizada, "Estado de la orden actualizado a " + estado));
     }
+
+    @PostMapping("/{id}/rechazar")
+    public ResponseEntity<ApiResponse<OrdenIngresoResponseDto>> rechazarOrden(
+            @PathVariable UUID id,
+            @Valid @RequestBody com.cdasanpedro.application.dto.ingreso.RechazoOrdenRequestDto request,
+            Authentication authentication
+    ) {
+        UUID usuarioId = authentication != null ? (UUID) authentication.getCredentials() : null;
+        OrdenIngresoResponseDto actualizada = ordenIngresoService.rechazarOrden(id, request, usuarioId);
+        return ResponseEntity.ok(ApiResponse.ok(actualizada, "Orden rechazada con registro de motivo y evidencia"));
+    }
 }

@@ -1,6 +1,7 @@
 package com.cdasanpedro.application.usecase.siigo;
 
 import com.cdasanpedro.application.dto.siigo.*;
+import com.cdasanpedro.core.exception.BusinessException;
 import com.cdasanpedro.core.exception.ResourceNotFoundException;
 import com.cdasanpedro.core.gateway.NotificationGateway;
 import com.cdasanpedro.core.model.enums.EstadoFacturaDian;
@@ -64,7 +65,7 @@ public class SiigoInvoiceService {
             // 1. Sincronizar Pagador con SIIGO
             customerService.sincronizarCliente(factura.getClienteFactura());
 
-            // 2. Construir Payload de Factura de Venta
+            // 2. Construir Payload de Factura de Venta con emisión DIAN habilitada (stamp.send: true, mail.send: true)
             SiigoInvoiceRequestDto invoiceRequest = construirPayloadFactura(factura);
             String payloadJson = objectMapper.writeValueAsString(invoiceRequest);
             dianEntity.setPayloadEnviado(payloadJson);
@@ -73,11 +74,27 @@ public class SiigoInvoiceService {
 
             // 3. Ejecutar llamada o simulación Sandbox
             if (!properties.isConfigured() && properties.isSandbox()) {
-                log.info(">> [SIIGO SANDBOX] Emisión electrónica simulada para factura: {}", factura.getNumeroFactura());
+                log.info(">> [SIIGO SANDBOX] Emisión electrónica simulada con aprobación DIAN para factura: {}", factura.getNumeroFactura());
                 response = generarRespuestaSimulada(factura, invoiceRequest);
             } else {
                 String token = authService.getValidToken();
                 response = apiClient.createInvoice(invoiceRequest, token);
+
+                // Si la DIAN está procesando de forma asíncrona, consultar estado final tras breve espera
+                if (response != null && response.getId() != null && 
+                        (response.getCufe() == null || (response.getStamp() != null && "In_process".equalsIgnoreCase(response.getStamp().getStatus())))) {
+                    try {
+                        Thread.sleep(2000); // 2 segundos para dar margen de validación a la DIAN
+                        SiigoInvoiceResponseDto updated = apiClient.getInvoice(response.getId(), token);
+                        if (updated != null) {
+                            response = updated;
+                        }
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    } catch (Exception exPoll) {
+                        log.warn(">> [SIIGO DIAN] No se pudo re-consultar estado inmediato: {}", exPoll.getMessage());
+                    }
+                }
             }
 
             // 4. Guardar datos fiscales oficiales
@@ -87,26 +104,42 @@ public class SiigoInvoiceService {
             dianEntity.setNumeroFacturaSiigo(response.getName() != null ? response.getName() : "FV-" + response.getNumber());
             
             String cufe = response.getCufe() != null ? response.getCufe() : 
-                    (response.getStamp() != null ? response.getStamp().getCufe() : UUID.randomUUID().toString().replace("-", ""));
+                    (response.getStamp() != null && response.getStamp().getCufe() != null ? response.getStamp().getCufe() : null);
             String qr = response.getQrCode() != null ? response.getQrCode() :
-                    (response.getStamp() != null ? response.getStamp().getQr() : "https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=" + cufe);
+                    (response.getStamp() != null && response.getStamp().getQr() != null ? response.getStamp().getQr() : null);
             String pdfUrl = response.getPublicUrl() != null ? response.getPublicUrl() : "https://api.siigo.com/v1/invoices/" + response.getId() + "/pdf";
 
-            dianEntity.setCufe(cufe);
-            dianEntity.setQrDian(qr);
-            dianEntity.setPdfSiigoUrl(pdfUrl);
-            dianEntity.setEstadoDian(EstadoFacturaDian.EMITIDA);
-            dianEntity.setMensajeRespuesta("Factura emitida y validada exitosamente ante la DIAN vía SIIGO Cloud.");
-            dianEntity.setFechaEmisionDian(OffsetDateTime.now());
+            String stampStatus = response.getStamp() != null ? response.getStamp().getStatus() : null;
 
-            log.info(">> [SIIGO DIAN] Factura {} emitida exitosamente con CUFE: {}",
-                    factura.getNumeroFactura(), cufe);
+            if ("Rejected".equalsIgnoreCase(stampStatus)) {
+                dianEntity.setEstadoDian(EstadoFacturaDian.FALLIDA);
+                String errorDetails = extraerErroresSiigo(response);
+                dianEntity.setMensajeRespuesta("Rechazada por la DIAN vía SIIGO: " + errorDetails);
+                log.warn(">> [SIIGO DIAN] Factura {} rechazada por DIAN: {}", factura.getNumeroFactura(), errorDetails);
+            } else {
+                if (cufe == null || cufe.isBlank()) {
+                    cufe = properties.isSandbox() ? UUID.randomUUID().toString().replace("-", "") : null;
+                }
+                if (qr == null && cufe != null) {
+                    qr = "https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=" + cufe;
+                }
 
-            // 5. Despacho obligatorio de correo con PDF DIAN adjunto por ley (solo tras emisión exitosa)
-            despacharCorreoFacturaDian(factura, dianEntity);
+                dianEntity.setCufe(cufe);
+                dianEntity.setQrDian(qr);
+                dianEntity.setPdfSiigoUrl(pdfUrl);
+                dianEntity.setEstadoDian(EstadoFacturaDian.EMITIDA);
+                dianEntity.setMensajeRespuesta("Factura emitida y transmitida a la DIAN vía SIIGO Cloud (Estado DIAN: " + (stampStatus != null ? stampStatus : "Aprobada") + ")");
+                dianEntity.setFechaEmisionDian(OffsetDateTime.now());
 
-            // 6. Despacho de WhatsApp con datos oficiales de SIIGO
-            despacharWhatsAppFacturaDian(factura, dianEntity);
+                log.info(">> [SIIGO DIAN] Factura {} emitida y enviada a DIAN exitosamente con CUFE: {}",
+                        factura.getNumeroFactura(), cufe);
+
+                // 5. Despacho obligatorio de correo con PDF DIAN adjunto por ley (solo tras emisión exitosa)
+                despacharCorreoFacturaDian(factura, dianEntity);
+
+                // 6. Despacho de WhatsApp con datos oficiales de SIIGO
+                despacharWhatsAppFacturaDian(factura, dianEntity);
+            }
 
         } catch (Exception e) {
             log.error(">> [SIIGO DIAN] Error al emitir factura {}: {}", factura.getNumeroFactura(), e.getMessage());
@@ -116,11 +149,80 @@ public class SiigoInvoiceService {
             if (errorMsg.contains("timed out") || errorMsg.contains("Timeout") || errorMsg.contains("SocketTimeoutException")) {
                 errorMsg = "Tiempo de espera agotado al comunicar con SIIGO Cloud (Timeout). Puede reintentar la emisión fiscal.";
             }
-            dianEntity.setMensajeRespuesta("Fallo en transmisión: " + errorMsg);
+            dianEntity.setMensajeRespuesta("Fallo en transmisión a la DIAN: " + errorMsg);
         }
 
         FacturaElectronicaDianEntity guardada = dianRepository.save(dianEntity);
         return mapToDto(guardada);
+    }
+
+    @Transactional
+    public FacturaElectronicaResponseDto sincronizarEstadoDian(UUID facturaId) {
+        FacturaEntity factura = facturaRepository.findById(facturaId)
+                .orElseThrow(() -> new ResourceNotFoundException("Factura no encontrada con ID: " + facturaId));
+
+        FacturaElectronicaDianEntity dianEntity = dianRepository.findByFacturaId(facturaId)
+                .orElseThrow(() -> new BusinessException("La factura " + factura.getNumeroFactura() + " no tiene registro de emisión previa en SIIGO."));
+
+        if (dianEntity.getSiigoInvoiceId() == null || !properties.isConfigured()) {
+            return mapToDto(dianEntity);
+        }
+
+        try {
+            String token = authService.getValidToken();
+            // 1. Consultar estado en SIIGO
+            SiigoInvoiceResponseDto invoiceInfo = apiClient.getInvoice(dianEntity.getSiigoInvoiceId(), token);
+            
+            // 2. Si no tiene CUFE o status es Draft, solicitar timbrado expreso
+            if (invoiceInfo != null && (invoiceInfo.getCufe() == null || (invoiceInfo.getStamp() != null && "Draft".equalsIgnoreCase(invoiceInfo.getStamp().getStatus())))) {
+                try {
+                    log.info(">> [SIIGO DIAN] Solicitando timbrado explícito ante DIAN para factura SIIGO ID: {}", dianEntity.getSiigoInvoiceId());
+                    invoiceInfo = apiClient.stampInvoice(dianEntity.getSiigoInvoiceId(), token);
+                } catch (Exception exStamp) {
+                    log.warn(">> [SIIGO DIAN] Intento de timbrado retornó: {}", exStamp.getMessage());
+                }
+            }
+
+            if (invoiceInfo != null) {
+                String respuestaJson = objectMapper.writeValueAsString(invoiceInfo);
+                dianEntity.setRespuestaSiigo(respuestaJson);
+
+                String cufe = invoiceInfo.getCufe() != null ? invoiceInfo.getCufe() :
+                        (invoiceInfo.getStamp() != null ? invoiceInfo.getStamp().getCufe() : dianEntity.getCufe());
+                String qr = invoiceInfo.getQrCode() != null ? invoiceInfo.getQrCode() :
+                        (invoiceInfo.getStamp() != null ? invoiceInfo.getStamp().getQr() : dianEntity.getQrDian());
+                String pdfUrl = invoiceInfo.getPublicUrl() != null ? invoiceInfo.getPublicUrl() : dianEntity.getPdfSiigoUrl();
+                String stampStatus = invoiceInfo.getStamp() != null ? invoiceInfo.getStamp().getStatus() : null;
+
+                if (cufe != null && !cufe.isBlank()) {
+                    dianEntity.setCufe(cufe);
+                    dianEntity.setQrDian(qr != null ? qr : "https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=" + cufe);
+                    dianEntity.setPdfSiigoUrl(pdfUrl);
+                    dianEntity.setEstadoDian(EstadoFacturaDian.EMITIDA);
+                    dianEntity.setMensajeRespuesta("Aprobada y validada por la DIAN (CUFE: " + cufe + ")");
+                } else if ("Rejected".equalsIgnoreCase(stampStatus)) {
+                    dianEntity.setEstadoDian(EstadoFacturaDian.FALLIDA);
+                    dianEntity.setMensajeRespuesta("Rechazada por la DIAN: " + extraerErroresSiigo(invoiceInfo));
+                }
+                dianEntity = dianRepository.save(dianEntity);
+            }
+        } catch (Exception e) {
+            log.error(">> [SIIGO DIAN] Error al sincronizar estado de factura {}: {}", factura.getNumeroFactura(), e.getMessage());
+        }
+
+        return mapToDto(dianEntity);
+    }
+
+    private String extraerErroresSiigo(SiigoInvoiceResponseDto response) {
+        if (response == null) return "Sin detalle";
+        StringBuilder sb = new StringBuilder();
+        if (response.getErrors() != null && !response.getErrors().isEmpty()) {
+            response.getErrors().forEach(err -> sb.append(err.getMessage() != null ? err.getMessage() : err.getCode()).append("; "));
+        }
+        if (response.getStamp() != null && response.getStamp().getErrors() != null) {
+            response.getStamp().getErrors().forEach(err -> sb.append(err.getMessage() != null ? err.getMessage() : err.getCode()).append("; "));
+        }
+        return sb.length() > 0 ? sb.toString() : "Rechazo de validación fiscal";
     }
 
     @Transactional(readOnly = true)

@@ -16,6 +16,8 @@ public interface TerceroRepository extends JpaRepository<TerceroEntity, UUID> {
 
     Optional<TerceroEntity> findByNumeroDocumento(String numeroDocumento);
 
+    Optional<TerceroEntity> findByEmailPrincipal(String emailPrincipal);
+
     boolean existsByNumeroDocumento(String numeroDocumento);
 
     @Query("SELECT t FROM TerceroEntity t JOIN t.roles r WHERE r.tipoRol = :tipoRol AND t.activo = true AND r.activo = true ORDER BY t.razonSocialONombre ASC")

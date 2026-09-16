@@ -34,17 +34,21 @@ public class ReporteService {
     private final FacturaService facturaService;
     private final VehiculoService vehiculoService;
 
+    private static final java.time.ZoneId ZONE_COLOMBIA = java.time.ZoneId.of("America/Bogota");
+
     @Transactional(readOnly = true)
     public DashboardStatsDto obtenerDashboardStats() {
-        LocalDate hoy = LocalDate.now();
-        OffsetDateTime start = hoy.atStartOfDay().atOffset(ZoneOffset.UTC);
-        OffsetDateTime end = hoy.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC);
+        LocalDate hoy = LocalDate.now(ZONE_COLOMBIA);
+        OffsetDateTime start = hoy.atStartOfDay(ZONE_COLOMBIA).toOffsetDateTime();
+        OffsetDateTime end = hoy.plusDays(1).atStartOfDay(ZONE_COLOMBIA).toOffsetDateTime();
 
         List<OrdenIngresoEntity> ordenesHoy = ordenIngresoRepository.findByFechaIngresoBetween(start, end);
         List<FacturaEntity> facturasHoy = facturaRepository.findByFechaEmisionBetween(start, end);
 
         BigDecimal recaudoHoy = facturasHoy.stream()
+                .filter(f -> f.getEstado() == com.cdasanpedro.core.model.enums.EstadoFactura.PAGADA)
                 .map(FacturaEntity::getTotal)
+                .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         // Contadores por categoría de vehículo hoy
@@ -91,16 +95,18 @@ public class ReporteService {
 
     @Transactional(readOnly = true)
     public ReporteVentasDto generarReporteVentas(LocalDate fechaInicio, LocalDate fechaFin) {
-        LocalDate startDay = fechaInicio != null ? fechaInicio : LocalDate.now().minusDays(30);
-        LocalDate endDay = fechaFin != null ? fechaFin : LocalDate.now();
+        LocalDate startDay = fechaInicio != null ? fechaInicio : LocalDate.now(ZONE_COLOMBIA).minusDays(30);
+        LocalDate endDay = fechaFin != null ? fechaFin : LocalDate.now(ZONE_COLOMBIA);
 
-        OffsetDateTime start = startDay.atStartOfDay().atOffset(ZoneOffset.UTC);
-        OffsetDateTime end = endDay.plusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC);
+        OffsetDateTime start = startDay.atStartOfDay(ZONE_COLOMBIA).toOffsetDateTime();
+        OffsetDateTime end = endDay.plusDays(1).atStartOfDay(ZONE_COLOMBIA).toOffsetDateTime();
 
         List<FacturaEntity> facturas = facturaRepository.findByFechaEmisionBetween(start, end);
 
         BigDecimal totalRecaudado = facturas.stream()
+                .filter(f -> f.getEstado() == com.cdasanpedro.core.model.enums.EstadoFactura.PAGADA)
                 .map(FacturaEntity::getTotal)
+                .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         Map<String, Long> vehiculosPorCategoria = new HashMap<>();
@@ -108,14 +114,16 @@ public class ReporteService {
 
         for (FacturaEntity f : facturas) {
             // Categoría
-            if (f.getOrdenIngreso() != null && f.getOrdenIngreso().getVehiculo() != null) {
+            if (f.getOrdenIngreso() != null && f.getOrdenIngreso().getVehiculo() != null && f.getOrdenIngreso().getVehiculo().getCategoria() != null) {
                 String cat = f.getOrdenIngreso().getVehiculo().getCategoria().name();
                 vehiculosPorCategoria.put(cat, vehiculosPorCategoria.getOrDefault(cat, 0L) + 1);
             }
 
             // Método de Pago
-            String met = f.getMetodoPago().name();
-            ingresosPorMetodo.put(met, ingresosPorMetodo.getOrDefault(met, BigDecimal.ZERO).add(f.getTotal()));
+            if (f.getMetodoPago() != null && f.getTotal() != null) {
+                String met = f.getMetodoPago().name();
+                ingresosPorMetodo.put(met, ingresosPorMetodo.getOrDefault(met, BigDecimal.ZERO).add(f.getTotal()));
+            }
         }
 
         List<FacturaResponseDto> facturasDto = facturas.stream()
@@ -158,19 +166,45 @@ public class ReporteService {
     }
 
     private List<ActividadHorariaDto> construirActividadHoraria(List<OrdenIngresoEntity> ordenes, List<FacturaEntity> facturas) {
-        String[] bloques = {"08:00", "10:00", "12:00", "14:00", "16:00", "18:00"};
+        String[] bloques = {
+            "08:00", "09:00", "10:00", "11:00", "12:00",
+            "13:00", "14:00", "15:00", "16:00", "17:00"
+        };
         List<ActividadHorariaDto> lista = new ArrayList<>();
 
-        for (String b : bloques) {
-            int horaBloque = Integer.parseInt(b.split(":")[0]);
+        for (int i = 0; i < bloques.length; i++) {
+            String b = bloques[i];
+            int horaInicio = Integer.parseInt(b.split(":")[0]);
 
+            final int index = i;
             long countVeh = ordenes.stream()
-                    .filter(o -> o.getFechaIngreso() != null && o.getFechaIngreso().getHour() >= horaBloque && o.getFechaIngreso().getHour() < horaBloque + 2)
+                    .filter(o -> {
+                        if (o.getFechaIngreso() == null) return false;
+                        int h = o.getFechaIngreso().atZoneSameInstant(ZONE_COLOMBIA).getHour();
+                        if (index == 0) {
+                            return h <= horaInicio; // 08:00 cubre cualquier ingreso matutino temprano (<= 8h)
+                        } else if (index == bloques.length - 1) {
+                            return h >= horaInicio; // 17:00 cubre 17:00 (5:00 PM) en adelante
+                        } else {
+                            return h == horaInicio; // Bloques individuales hora por hora (9h, 10h, 11h, etc.)
+                        }
+                    })
                     .count();
 
             BigDecimal sumIngresos = facturas.stream()
-                    .filter(f -> f.getFechaEmision() != null && f.getFechaEmision().getHour() >= horaBloque && f.getFechaEmision().getHour() < horaBloque + 2)
+                    .filter(f -> {
+                        if (f.getFechaEmision() == null) return false;
+                        int h = f.getFechaEmision().atZoneSameInstant(ZONE_COLOMBIA).getHour();
+                        if (index == 0) {
+                            return h <= horaInicio;
+                        } else if (index == bloques.length - 1) {
+                            return h >= horaInicio;
+                        } else {
+                            return h == horaInicio;
+                        }
+                    })
                     .map(FacturaEntity::getTotal)
+                    .filter(Objects::nonNull)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
             lista.add(ActividadHorariaDto.builder()

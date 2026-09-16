@@ -13,6 +13,11 @@ import jakarta.mail.internet.MimeMessage;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.ClassPathResource;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.Map;
 
 @Service
@@ -28,6 +33,16 @@ public class NotificationGatewayImpl implements NotificationGateway {
 
     @org.springframework.beans.factory.annotation.Value("${app.mail.from-name:CDA San Pedro}")
     private String fromName;
+
+    @org.springframework.beans.factory.annotation.Value("${app.sms.android-gateway-url:${ANDROID_SMS_GATEWAY_URL:}}")
+    private String androidSmsGatewayUrl;
+
+    @org.springframework.beans.factory.annotation.Value("${app.sms.android-gateway-token:${ANDROID_SMS_GATEWAY_TOKEN:}}")
+    private String androidSmsGatewayToken;
+
+    private final HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(8))
+            .build();
 
     @Override
     @Async
@@ -51,7 +66,10 @@ public class NotificationGatewayImpl implements NotificationGateway {
 
                 // Incrustar logotipo inline vía CID (Content-ID) para visualización nativa sin depender de hosting externo
                 try {
-                    ClassPathResource logoResource = new ClassPathResource("assets/LogoCDA.PNG");
+                    ClassPathResource logoResource = new ClassPathResource("assets/LOGOCDAOPT.PNG");
+                    if (!logoResource.exists()) {
+                        logoResource = new ClassPathResource("assets/LogoCDA.PNG");
+                    }
                     if (logoResource.exists()) {
                         helper.addInline("logoCda", logoResource, "image/png");
                     }
@@ -73,27 +91,24 @@ public class NotificationGatewayImpl implements NotificationGateway {
     }
 
     private String construirPlantillaHtml(String titulo, String contenido) {
+        String header = EmailTemplateBuilder.getHeaderHtml(titulo != null ? titulo : "Notificación Oficial");
+        String footer = EmailTemplateBuilder.getFooterHtml();
         return """
             <!DOCTYPE html>
             <html lang="es">
             <head>
                 <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <style>
-                    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0A0A0A; color: #F1F5F9; margin: 0; padding: 20px; }
-                    .card { max-width: 600px; margin: 0 auto; background-color: #111827; border: 1px solid #1F2937; border-radius: 16px; overflow: hidden; }
-                    .header { background: linear-gradient(135deg, #111827 0%, #1F2937 100%); padding: 24px; border-bottom: 2px solid #F59E0B; text-align: center; }
-                    .header h1 { margin: 0; color: #F59E0B; font-size: 20px; font-weight: 800; letter-spacing: 1px; }
+                    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0A0A0A; color: #F1F5F9; margin: 0; padding: 20px; }
+                    .card { max-width: 600px; margin: 0 auto; background-color: #111827; border: 1px solid #1F2937; border-top: 4px solid #F59E0B; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
                     .body { padding: 30px; font-size: 15px; line-height: 1.6; color: #CBD5E1; }
-                    .highlight-box { background-color: #1E293B; border-left: 4px solid #F59E0B; padding: 15px; border-radius: 8px; margin: 20px 0; color: #F8FAFC; }
-                    .footer { background-color: #0B0F17; padding: 16px; text-align: center; font-size: 11px; color: #64748B; border-top: 1px solid #1E293B; }
+                    .highlight-box { background-color: #1E293B; border-left: 4px solid #F59E0B; padding: 18px; border-radius: 8px; margin: 20px 0; color: #F8FAFC; }
                 </style>
             </head>
             <body>
                 <div class="card">
-                    <div class="header">
-                        <h1>CDA SAN PEDRO</h1>
-                        <p style="margin: 4px 0 0 0; font-size: 12px; color: #94A3B8;">Centro de Diagnóstico Automotor Oficial</p>
-                    </div>
+                    {{HEADER}}
                     <div class="body">
                         <h2 style="color: #FFFFFF; font-size: 18px; margin-top: 0;">{{TITULO}}</h2>
                         <div class="highlight-box">
@@ -101,13 +116,13 @@ public class NotificationGatewayImpl implements NotificationGateway {
                         </div>
                         <p style="font-size: 13px; color: #94A3B8;">Si tienes alguna pregunta o requieres soporte, comunícate con nuestras líneas de atención autorizadas.</p>
                     </div>
-                    <div class="footer">
-                        <p style="margin: 0;">© 2026 CDA San Pedro. Todos los derechos reservados.</p>
-                    </div>
+                    {{FOOTER}}
                 </div>
             </body>
             </html>
             """
+            .replace("{{HEADER}}", header)
+            .replace("{{FOOTER}}", footer)
             .replace("{{TITULO}}", titulo != null ? titulo : "")
             .replace("{{CONTENIDO}}", contenido != null ? contenido : "");
     }
@@ -115,8 +130,58 @@ public class NotificationGatewayImpl implements NotificationGateway {
     @Override
     @Async
     public void sendWhatsAppMessage(String phoneNumber, String templateOrMessage, Map<String, String> parameters) {
-        // Adaptador agnóstico: actualmente registra en log y deja el hook listo para Meta Cloud API o Evolution API
-        log.info("[NotificationGateway - WhatsApp] Encolado mensaje para celular: {} - Mensaje/Template: {} - Parámetros: {}", 
-                phoneNumber, templateOrMessage, parameters);
+        log.info("[NotificationGateway - SMS/Móvil] Procesando despacho a celular: {}", phoneNumber);
+
+        // Si está configurada la URL de Android SMS Gateway (servidor local gratuito por app en celular)
+        if (androidSmsGatewayUrl != null && !androidSmsGatewayUrl.isBlank()) {
+            try {
+                // Formato JSON universal para apps Android SMS Gateway
+                String jsonBody = String.format(
+                        "{\"phone\":\"%s\",\"to\":\"%s\",\"message\":\"%s\",\"text\":\"%s\"}",
+                        phoneNumber,
+                        phoneNumber,
+                        escapeJson(templateOrMessage),
+                        escapeJson(templateOrMessage)
+                );
+
+                var requestBuilder = HttpRequest.newBuilder()
+                        .uri(URI.create(androidSmsGatewayUrl.trim()))
+                        .timeout(Duration.ofSeconds(10))
+                        .header("Content-Type", "application/json");
+
+                if (androidSmsGatewayToken != null && !androidSmsGatewayToken.isBlank()) {
+                    requestBuilder.header("Authorization", "Bearer " + androidSmsGatewayToken.trim());
+                    requestBuilder.header("X-API-Key", androidSmsGatewayToken.trim());
+                }
+
+                HttpRequest request = requestBuilder
+                        .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                        .build();
+
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+                if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                    log.info("[Android SMS Gateway] SMS despachado exitosamente a {} vía celular Android (Status: {})", phoneNumber, response.statusCode());
+                } else {
+                    log.warn("[Android SMS Gateway] Respuesta no exitosa del móvil (Status: {}): {}", response.statusCode(), response.body());
+                }
+            } catch (Exception ex) {
+                log.error("[Android SMS Gateway] Error al conectar con el celular Android {}: {}", androidSmsGatewayUrl, ex.getMessage());
+            }
+        } else {
+            log.info("[NotificationGateway - SMS Móvil SIMULADO] Celular: {} - Mensaje: {} (Para enviar SMS reales gratis mediante un celular Android, configure ANDROID_SMS_GATEWAY_URL en .env)",
+                    phoneNumber, templateOrMessage);
+        }
+    }
+
+    private String escapeJson(String raw) {
+        if (raw == null) return "";
+        return raw.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\b", "\\b")
+                .replace("\f", "\\f")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
     }
 }

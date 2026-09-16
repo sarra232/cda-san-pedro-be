@@ -79,6 +79,24 @@ public class SiigoApiClient {
                 .body(SiigoInvoiceResponseDto.class);
     }
 
+    public SiigoInvoiceResponseDto getInvoice(String invoiceId, String token) {
+        log.info(">> [SIIGO API] Consultando estado fiscal y timbrado DIAN de factura ID: {}", invoiceId);
+        return getClient(token)
+                .get()
+                .uri("/invoices/{id}", invoiceId)
+                .retrieve()
+                .body(SiigoInvoiceResponseDto.class);
+    }
+
+    public SiigoInvoiceResponseDto stampInvoice(String invoiceId, String token) {
+        log.info(">> [SIIGO API] Solicitando timbrado y transmisión DIAN para factura ID: {}", invoiceId);
+        return getClient(token)
+                .post()
+                .uri("/invoices/{id}/stamp", invoiceId)
+                .retrieve()
+                .body(SiigoInvoiceResponseDto.class);
+    }
+
     public SiigoInvoicePdfResponseDto getInvoicePdf(String invoiceId, String token) {
         log.info(">> [SIIGO API] Consultando PDF oficial de factura ID: {}", invoiceId);
         return getClient(token)

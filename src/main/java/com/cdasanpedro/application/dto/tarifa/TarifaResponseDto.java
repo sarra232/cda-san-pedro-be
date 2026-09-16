@@ -21,6 +21,13 @@ public class TarifaResponseDto {
     private String tipoServicio;
     private String nombreServicio;
     private String descripcion;
+    private BigDecimal valorServicio;
+    private BigDecimal iva;
+    private BigDecimal runt;
+    private BigDecimal sicov;
+    private BigDecimal operador;
+    private BigDecimal seguridadVial;
+    private BigDecimal fupa;
     private BigDecimal precio;
     private BigDecimal ivaPorcentaje;
     private Boolean activo;
